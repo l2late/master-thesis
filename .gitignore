@@ -9,8 +9,6 @@ paru/
 
 # Distribution / packaging
 .Python
-/data/*
-!data/five_room_horizon_RC_hetero_pyg_inmemory_dataset/
 env/
 .env
 build/
