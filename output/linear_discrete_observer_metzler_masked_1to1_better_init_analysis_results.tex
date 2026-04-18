@@ -1,0 +1,36 @@
+
+\caption{Performance and Structural Properties of Identified Models. $n_l$ is the number of latent states, $T_{\mathrm{margin}}$ is the $\pm$ temperature margin around the Hysteresis setpoint where a input PRBS signal is applied, and the observability and controllability metrics indicate the structural properties of the identified state-space models. RMSE is computed on the validation set. Bold values indicate the lowest RMSEs.}
+\label{tab:model_analysis}
+\begin{tabular}{cc c cc cc}
+\toprule
+\multicolumn{2}{c}{Parameters} & \multicolumn{1}{c}{Performance} & \multicolumn{2}{c}{Observability} & \multicolumn{2}{c}{Controllability} \\
+\cmidrule(lr){1-2} \cmidrule(lr){3-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+$n_l$ & $T_{\mathrm{margin}}$ & RMSE ($^\circ$C) & Rank & $\kappa(W_{\mathcal{O}})$ & Rank & $\kappa(W_{\mathcal{C}})$ \\
+\midrule
+5 & 1.0 & \textbf{0.5307} & $10/10$ & $27.5$ & $10/10$ & $4.7 \times 10^{3}$ \\
+5 & 1.0 & $0.5835$ & $10/10$ & $20.4$ & $10/10$ & $2.0 \times 10^{4}$ \\
+5 & 1.0 & \textbf{0.5666} & $10/10$ & $20.7$ & $10/10$ & $3.4 \times 10^{4}$ \\
+5 & 1.0 & $0.5798$ & $10/10$ & $27.2$ & $10/10$ & $3.0 \times 10^{4}$ \\
+5 & 1.0 & $0.6105$ & $10/10$ & $20.1$ & $10/10$ & $2.2 \times 10^{4}$ \\
+5 & 2.0 & \textbf{0.5759} & $10/10$ & $17.6$ & $10/10$ & $2.3 \times 10^{4}$ \\
+5 & 2.0 & $0.6047$ & $10/10$ & $15.1$ & $10/10$ & $7.0 \times 10^{4}$ \\
+5 & 2.0 & $0.5925$ & $10/10$ & $15.8$ & $10/10$ & $3.1 \times 10^{4}$ \\
+5 & 2.0 & $0.5788$ & $10/10$ & $17.6$ & $10/10$ & $6.2 \times 10^{4}$ \\
+5 & 2.0 & $0.5828$ & $10/10$ & $14.6$ & $10/10$ & $4.9 \times 10^{4}$ \\
+5 & 3.0 & $0.6798$ & $10/10$ & $21.6$ & $10/10$ & $6.2 \times 10^{4}$ \\
+5 & 3.0 & $0.6717$ & $10/10$ & $18.9$ & $10/10$ & $5.6 \times 10^{4}$ \\
+5 & 3.0 & $0.6671$ & $10/10$ & $22.1$ & $10/10$ & $5.9 \times 10^{4}$ \\
+5 & 3.0 & $0.6570$ & $10/10$ & $25.0$ & $10/10$ & $6.0 \times 10^{4}$ \\
+5 & 3.0 & $0.6650$ & $10/10$ & $20.0$ & $10/10$ & $8.3 \times 10^{4}$ \\
+5 & 4.0 & $0.6248$ & $10/10$ & $10.8$ & $10/10$ & $3.8 \times 10^{4}$ \\
+5 & 4.0 & $0.5987$ & $10/10$ & $16.1$ & $10/10$ & $3.6 \times 10^{4}$ \\
+5 & 4.0 & $0.6089$ & $10/10$ & $11.5$ & $10/10$ & $4.6 \times 10^{4}$ \\
+5 & 4.0 & $0.5978$ & $10/10$ & $15.4$ & $10/10$ & $3.0 \times 10^{4}$ \\
+5 & 4.0 & $0.5975$ & $10/10$ & $15.2$ & $10/10$ & $4.1 \times 10^{4}$ \\
+5 & 5.0 & $0.6745$ & $10/10$ & $13.0$ & $10/10$ & $3.3 \times 10^{4}$ \\
+5 & 5.0 & $0.6928$ & $10/10$ & $10.9$ & $10/10$ & $4.0 \times 10^{4}$ \\
+5 & 5.0 & $0.6833$ & $10/10$ & $13.0$ & $10/10$ & $4.3 \times 10^{4}$ \\
+5 & 5.0 & $0.6723$ & $10/10$ & $12.5$ & $10/10$ & $6.9 \times 10^{4}$ \\
+5 & 5.0 & $0.6829$ & $10/10$ & $9.6$ & $10/10$ & $6.3 \times 10^{4}$ \\
+\bottomrule
+\end{tabular}

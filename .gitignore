@@ -1,0 +1,144 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+paru/
+*.pdf
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+/data/*
+!data/five_room_horizon_RC_hetero_pyg_inmemory_dataset/
+env/
+.env
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# PytorchLightning
+lightning_logs/
+*.trace.json
+checkpoints/
+**/checkpoints/
+GNN/
+**/GNN/
+artifacts/
+**/artifacts/
+*.ckpt
+*.pth
+*.pt
+
+# Pytorch Geometric data
+Cora/
+
+# Weights and Biases
+wandb/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# Translations
+*.mo
+*.pot
+
+*.log
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# DotEnv configuration
+.env
+
+# Database
+*.db
+*.rdb
+
+# Pycharm
+.idea
+
+# VS Code
+.vscode/
+
+# Spyder
+.spyproject/
+
+# Jupyter NB Checkpoints
+.ipynb_checkpoints/
+.virtual_documents/
+notebooks/.virtual_documents/
+
+# exclude data from source control by default
+# Mac OS-specific storage files
+.DS_Store
+
+# vim
+*.swp
+*.swo
+
+# Mypy cache
+.mypy_cache/
+notebooks/.virtual_documents/
+src/models/trace_name.prof
+Session.vim
+.hypothesis/examples
+tests/data/tests/data/test_variable_hd5f_group.hdf5
+tests/data/test_variable_hd5f_group.hdf5
+server exited unexpectedly
+.python-version
+*.joblib
+
+# numpy
+*.npy
+
+# latex
+*.tex
+
+# images
+*.png
+*.svg
+**/visualizations/*
+logs/
+.hypothesis/constants
+
+sinergym/
+*.parquet
+output/*
+mlruns
+/.agents/skills
+/.opencode
+/.sisyphus/plans
+/skills-lock.json
+AGENTS.md

@@ -1,0 +1,41 @@
+FROM vastai/pytorch:2.7.1-cuda-12.8.1-py310-22.04
+
+# Install ranger and clean up the apt cache
+RUN apt-get update && apt-get install -y ranger && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+ENV UV_PROJECT_ENVIRONMENT=/venv/main
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+# Prevent dev dependencies in uv run
+ENV UV_NO_DEV=1  
+
+# Install dependencies only (no project)
+WORKDIR /opt/workspace-internal/
+COPY pyproject.toml uv.lock* ./
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+
+
+WORKDIR /workspace
+ENV PATH="/venv/main/bin:${PATH}"
+ENV PYTHONDONTWRITEBYTECODE=0
+ENV PYTHONPATH="/workspace/src"
+# for JAX to prevent OOM on GPU
+ENV XLA_PYTHON_CLIENT_PREALLOCATE=false
+RUN echo 'export PYTHONPATH="/workspace/src"' >> /root/.bashrc
+
+COPY pyproject.toml /workspace/
+COPY src/ /workspace/src/
+COPY conf/ /workspace/conf/
+COPY scripts/ /workspace/scripts/
+RUN chmod +x /workspace/scripts/run_model_hpo.sh
+
+COPY /data/brcm_simulation_results/ /workspace/data/brcm_simulation_results
+COPY /data/building_plant_data.mat /workspace/data/building_plant_data.mat
+
+COPY /logs/train /workspace/logs/train
+
+RUN mkdir -p /workspace/logs/
+RUN mkdir -p /workspace/logs/optuna/
+

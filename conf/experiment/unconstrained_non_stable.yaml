@@ -1,0 +1,8 @@
+# @package _global_
+experiment_name: "unconstrained_topology_non_stable_metzler"
+tags:
+  ["unconstrained_topology", "stable_metzler_init", "no_instability_penalty"]
+
+model:
+  lambda_eigenvals_stability_penalty: 0
+  topology: UNCONSTRAINED

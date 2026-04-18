@@ -1,0 +1,42 @@
+# @package _global_
+
+# WARNING: Order of defaults determines the order in which configs override each other
+defaults:
+  - datamodule: default
+  - model: default
+  - model/lr_scheduler: cosine_annealing
+  - trainer: default
+  - callbacks: default
+  - paths: default
+  - hydra: default
+  - logger: wandb
+  # optional local config for machine/user specific settings
+  # it's optional since it doesn't need to exist and is excluded from version control
+  - optional local: default
+  - _self_ # placed at end so the contents from this config file can override the defaults above
+  - experiment: null # keep this after self so that experiment configs can override settings in this file
+
+# task name, determines output directory path
+task_name: "train"
+
+# required by datamodule and model configs
+horizon: 96
+window_size: 288
+# used to group related runs in wandb
+experiment_name: "default"
+tags: null
+
+# set False to skip model training
+train: True
+# set True to visualize A and B matrices before training
+visualize_init_matrices: False
+
+# evaluate on test set, using best model weights achieved during training
+# lightning chooses best weights based on the metric specified in checkpoint callback
+test: False
+
+# simply provide checkpoint path to resume training
+ckpt_path: null
+resume_training: False
+
+seed: 42

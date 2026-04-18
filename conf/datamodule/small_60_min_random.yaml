@@ -1,0 +1,3 @@
+defaults:
+  - default
+csv_file: "${paths.data_dir}/brcm_simulation_results/raw/five_room_1_year_Ts_60_min_fully_random.csv"

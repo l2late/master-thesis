@@ -1,0 +1,10 @@
+_target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+_partial_: true
+mode: min
+factor: 0.5
+patience: 10 #20
+threshold: 1e-4 # use low value (1e-6) to "deactivate" the scheduler
+threshold_mode: rel
+cooldown: 5 # number of epochs to wait before resuming normal operation after lr has been reduced
+eps: 1e-8
+min_lr: 1e-5

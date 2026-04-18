@@ -1,0 +1,7 @@
+# @package _global_
+experiment_name: "physical_fully_connected_topology_soft_stable_metzler_dynamics"
+tags: ["physical fully connected topology", "soft stability penalty"]
+
+model:
+  lambda_eigenvals_stability_penalty: 1
+  topology: PHYSICAL_FULLY_CONNECTED

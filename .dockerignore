@@ -1,0 +1,27 @@
+# Git files
+.git
+.gitignore
+
+# Python cache files
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+env/
+venv/
+.venv/
+
+# external packages
+sinergym/
+
+# IDE and OS-specific files
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/
+
+# Docker files
+Dockerfile
+.dockerignore

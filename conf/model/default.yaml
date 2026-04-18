@@ -1,0 +1,18 @@
+defaults:
+  - default_schema
+  - optimizer: adamw
+  - dynamics: soft_stable_metzler_dynamics
+
+_target_: alphabuilding.infrastructure.lightning.modules.discrete_observer_ode.LitMultiStepNeuralDiscreteODEModule
+
+horizon: "${horizon}"
+window_size: "${window_size}"
+num_latent_states: 5
+lr: 1e-2
+weight_decay: 0
+topology: PHYSICAL_ONE_TO_ONE
+lambda_eigenvals_stability_penalty: 1
+lambda_observer: 0.3
+
+dynamics:
+  scale: 0.01

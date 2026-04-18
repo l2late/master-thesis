@@ -1,0 +1,4 @@
+defaults:
+  - default
+csv_file: "${paths.data_dir}/brcm_simulation_results/raw/five_room_1_year_Ts_30_min_sine.csv"
+batch_size: 256

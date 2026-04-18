@@ -1,0 +1,12 @@
+
+
+
+
+1) Run BRCM_Setup.m if you run the Toolbox for the first time. This will make some minor code changes depending on your Matlab version. 
+
+2) Have a look at the heavily commented BRCM_DemoFile.m which demonstrates most functionality.
+
+
+   
+
+   

@@ -1,0 +1,13 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/workspace
+    command: /bin/bash
+
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train

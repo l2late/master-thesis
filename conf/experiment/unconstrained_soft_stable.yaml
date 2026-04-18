@@ -1,0 +1,13 @@
+# @package _global_
+experiment_name: "unconstrained_topology_soft_stable_metzler_dynamics"
+tags:
+  [
+    "soft_stable_metzler_dynamics",
+    "stable_metzler_init",
+    "instability_penalty",
+    "unconstrained_topology",
+  ]
+
+model:
+  lambda_eigenvals_stability_penalty: 1
+  topology: UNCONSTRAINED

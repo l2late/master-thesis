@@ -1,0 +1,10 @@
+_recursive_: false
+num_inputs: 5
+num_disturbances: 2
+scale: 0.01
+B_initializer: physical
+B_scale: 0.01
+
+A_module:
+  _target_: alphabuilding.infrastructure.pytorch.modules.baseline_dynamics.SoftStableMetzlerMatrix
+  _partial_: true

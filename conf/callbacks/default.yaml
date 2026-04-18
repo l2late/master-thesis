@@ -1,0 +1,15 @@
+defaults:
+  - model_checkpoint
+  # - early_stopping: null
+  - learning_rate_monitor
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch={epoch:04d}-val_rmse_celsius={val/rmse_celsius:.7f}"
+  save_top_k: 2
+  every_n_epochs: 5
+  monitor: "val/rmse_celsius"
+  mode: "min"
+  save_last: True
+  auto_insert_metric_name: False

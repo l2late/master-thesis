@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - datamodule: brcm_trajectory # Reference your datamodule config
+  - model: default # Reference your model config
+  - _self_ # placed at end so the contents from this config file can override the defaults above
+
+# Evaluation specific settings
+seed: 42
+start_idx: 0
+
+# Checkpoint settings
+ckpt_path: null # Specify path or leave null to auto-find latest
+ckpt_dir: "logs/train/runs"
+model_type: "multi_step_discrete_observer_ode"
+strict_loading: false
+
+# Override datamodule settings for evaluation
+datamodule:
+  batch_size: 1
+  num_workers: 0
+  pin_memory: true

@@ -1,0 +1,13 @@
+# @package _global_
+experiment_name: 1-to-1_topology_non_stable_metzler_dynamics
+tags:
+  [
+    "metzler_dynamics",
+    "stable_metzler_init",
+    "no_instability_penalty",
+    "1-to-1_topology",
+  ]
+
+model:
+  lambda_eigenvals_stability_penalty: 0
+  topology: PHYSICAL_ONE_TO_ONE
