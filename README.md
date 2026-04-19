@@ -89,12 +89,12 @@ This will build the Docker image and push it to Docker Hub. You can then use thi
 ./docker/docker_build_and_push.sh --no-push
 ```
 
-### Training multiple runs in parallel with CUDA MPS
+## Training multiple runs in parallel with CUDA MPS
 If you have access to a GPU that supports CUDA MPS, you can train multiple runs in parallel on the same GPU.
 
 The script `scripts/orchstraate_multi_process_on_single_gpu.py` can be used to orchestrate multiple training runs in parallel on a single GPU using CUDA MPS.
 
-Example:
+### Example:
 Running 50 runs with different seeds and two different variants of the experiment in parallel on a single GPU with a maximum of 10 jobs running in parallel.
 
 Be sure to adjust the `--max-jobs` option based on the available GPU memory in order to avoid throttling. You can monitor the GPU memory usage on a Vast AI instance with `nvtop`.
