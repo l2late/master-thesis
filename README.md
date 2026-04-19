@@ -14,7 +14,8 @@ The training data is generated with MATLAB. The code is a modified version of th
 
 The modified code and input files for this thesis can be found in the `matlab` directory. The main script can be found in `matlab/fes-cdc-examples-master/buildings/generate_data.m`. This script generates the training data and saves it in the `data` directory. The generated data is in the form of .csv files.
 
-The script also allows to save the A,B,C,D matrices of the BRCM building in a .mat file, which can then be used as the plant model for evaluation of the controller with the trained model.
+The script also allows to save the A,B,C,D matrices of the BRCM building in a .mat file (`data/building_plant_data.mat`), which can then be used as the plant model for evaluation of the controller with the trained model.
+Currently the matlab script does does not save the .mat file in the `data` directory (it saves it in the MATLAB running directory), but you can easily move it manually or modify the script to save it in the desired location.
 
 ## Installing dependencies
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management and virtual environments.
