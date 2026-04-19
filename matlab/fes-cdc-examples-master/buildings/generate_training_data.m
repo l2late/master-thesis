@@ -40,33 +40,33 @@ B.loadThermalModelData(thermalModelDataDir);
 
 %% ------------
 % compute the normals of each building element to validate orientation
-for i = 1:length(B.thermal_model_data.building_elements)
-    be = B.thermal_model_data.building_elements(i);
-
-    % Skip elements without vertices
-    if isempty(be.vertices) || length(be.vertices) < 3
-        continue
-    end
-
-    % Extract numeric coordinates from Vertex objects
-    coords = [[be.vertices.x]', [be.vertices.y]', [be.vertices.z]'];
-
-    % Compute outward normal via cross product of two edges
-    e1 = coords(2,:) - coords(1,:);
-    e2 = coords(3,:) - coords(1,:);
-    n  = cross(e1, e2);
-    n  = n / norm(n);
-
-    fprintf('BE %s: normal = [%+.2f, %+.2f, %+.2f]  →  ', ...
-        be.identifier, n(1), n(2), n(3));
-
-    % Interpret dominant direction
-    [~, ax] = max(abs(n));
-    dirs = {'E/W (X)', 'N/S (Y)', 'floor/ceiling (Z)'};
-    signs = {'+E', '+N', '+up'; '-W', '-S', '-down'};
-    sign_idx = 1 + (n(ax) < 0);
-    fprintf('%s\n', signs{sign_idx, ax});
-end
+% for i = 1:length(B.thermal_model_data.building_elements)
+%     be = B.thermal_model_data.building_elements(i);
+% 
+%     % Skip elements without vertices
+%     if isempty(be.vertices) || length(be.vertices) < 3
+%         continue
+%     end
+% 
+%     % Extract numeric coordinates from Vertex objects
+%     coords = [[be.vertices.x]', [be.vertices.y]', [be.vertices.z]'];
+% 
+%     % Compute outward normal via cross product of two edges
+%     e1 = coords(2,:) - coords(1,:);
+%     e2 = coords(3,:) - coords(1,:);
+%     n  = cross(e1, e2);
+%     n  = n / norm(n);
+% 
+%     fprintf('BE %s: normal = [%+.2f, %+.2f, %+.2f]  →  ', ...
+%         be.identifier, n(1), n(2), n(3));
+% 
+%     % Interpret dominant direction
+%     [~, ax] = max(abs(n));
+%     dirs = {'E/W (X)', 'N/S (Y)', 'floor/ceiling (Z)'};
+%     signs = {'+E', '+N', '+up'; '-W', '-S', '-down'};
+%     sign_idx = 1 + (n(ax) < 0);
+%     fprintf('%s\n', signs{sign_idx, ax});
+% end
 
 %% --------------------------------------------------------------------------------------
 % 3) Declare external heat flux models that should be included
@@ -201,7 +201,6 @@ Bv_cont = B.building_model.continuous_time_model.Bv;
 Bxu_cont = B.building_model.continuous_time_model.Bxu;
 Bvu_cont = B.building_model.continuous_time_model.Bvu;
 
-[~,~,nu] = size(Bvu_disc);
 
 % stiffness_ratio = min(real(eig(A_cont)))/max(real(eig(A_cont)));
 
@@ -210,7 +209,7 @@ Bvu_cont = B.building_model.continuous_time_model.Bvu;
 sys_disc = ss(A_disc, [Bu_disc, Bv_disc], eye(size(A_disc,1)), []);
 sys_disc.Ts = Ts_hrs;
 
-assess_model_reduction = 1;
+assess_model_reduction = 0;
 if assess_model_reduction == 1
     % Get Hankel singular values to assess state importance
     hsv = hsvd(sys_disc);
@@ -248,18 +247,6 @@ if assess_model_reduction == 1
     n_reduced = find(cumulative_energy > 0.99, 1, 'first');
     fprintf('States for 99%% energy: %d (from %d)\n', n_reduced, length(hsv));
 
-%     % Method 1: Use balred for automatic reduction to order n_reduced
-%     sys_reduced = balred(sys_disc, n_reduced);
-% 
-%     % Method 2: Try multiple orders and compare errors
-%     orders = 10:10:50;  % test different reduction orders
-%     sys_array = balred(sys_disc, orders);
-% 
-%     % Compare frequency responses
-%     figure;
-%     bode(sys_disc(:,1), sys_array(:,1), {1e-6, 1e2});
-%     legend(['Original (n=' num2str(size(A_disc,1)) ')'], ...
-%            arrayfun(@(n) ['n=' num2str(n)], orders, 'UniformOutput', false));
 end
 
 %% Load weather data
@@ -638,7 +625,7 @@ for T_margin = 2
 
     %% Plot intermediate results
 
-    plot_intermediate = 1;
+    plot_intermediate = 0;
     legend_fontsize = 10;
     start_days = 30;
     start_idx = start_days*24/Ts_hrs;
@@ -769,143 +756,142 @@ for T_margin = 2
 
     %% Plot ambient temperature
 
-
-% ---- Slice settings
-slice_start_hours = 500;
-slice_start_idx = round(slice_start_hours / Ts_hrs);   % keep your original logic
-
-usable_data_length = length(dt) - slice_start_idx;
-train_ratio = 0.10;
-val_ratio   = 0.05;
-test_ratio  = 0.10;
-
-train_slice_length = int64(usable_data_length * train_ratio);
-train_slice_end_idx = slice_start_idx + train_slice_length;
-
-val_slice_length = int64(usable_data_length * val_ratio);
-val_slice_end_idx = train_slice_end_idx + val_slice_length;
-
-test_slice_length = int64(usable_data_length * test_ratio);
-test_slice_end_idx = val_slice_end_idx + test_slice_length;
-
-% ---- Time markers
-t_start = dt(slice_start_idx);
-t_train_end = dt(train_slice_end_idx);
-t_val_end   = dt(val_slice_end_idx);
-t_test_end  = dt(test_slice_end_idx);
-
-% ---- Data window
-idx = slice_start_idx:test_slice_end_idx;
-dt_plot     = dt(idx);
-Tamb_plot   = Tamb(idx);
-SolRad_plot = SolRad(idx);
-
-% ---- Figure
-h9 = figure('Color','w', ...
-            'Units','centimeters', ...
-            'Position',[2 2 24 12]);
-
-tl = tiledlayout(2,1,'TileSpacing','compact','Padding','compact');
-
-% ---- Top subplot: Solar radiation
-ax1 = nexttile;
-plot(ax1, dt_plot, SolRad_plot, ...
-    'Color',[0.85 0.33 0.10], ...
-    'LineWidth',1.4);
-hold(ax1,'on')
-% xline(ax1, t_start,     '--k', 'LineWidth',2);
-xline(ax1, t_train_end, '--k', 'LineWidth',2);
-xline(ax1, t_val_end,   '--k', 'LineWidth',2);
-% xline(ax1, t_test_end,  '--k', 'LineWidth',2);
-hold(ax1,'off')
-
-ylabel(ax1,'Solar radiation [W/m$^2$]', ...
-    'Interpreter','latex','FontSize',12)
-title(ax1,'Solar Radiation and Ambient Temperature -- Rotterdam Airport 2021', ...
-    'Interpreter','latex','FontSize',13,'FontWeight','bold')
-
-ax1.FontName = 'Times';
-ax1.FontSize = 11;
-ax1.LineWidth = 1.0;
-ax1.Box = 'on';
-ax1.TickLabelInterpreter = 'latex';
-grid(ax1,'on')
-ax1.GridAlpha = 0.12;
-ax1.MinorGridAlpha = 0.08;
-ax1.XTickLabel = [];   % hide top x tick labels
-
-% ---- Bottom subplot: Ambient temperature
-ax2 = nexttile;
-plot(ax2, dt_plot, Tamb_plot, ...
-    'Color',[0 0.45 0.74], ...
-    'LineWidth',1.4);
-hold(ax2,'on')
-% xline(ax2, t_start,     '--k', 'LineWidth',1.2);
-xline(ax2, t_train_end, '--k', 'LineWidth',2);
-xline(ax2, t_val_end,   '--k', 'LineWidth',2);
-% xline(ax2, t_test_end,  '--r', 'LineWidth',1.2);
-hold(ax2,'off')
-
-ylabel(ax2,'Temperature [$^\circ$C]', ...
-    'Interpreter','latex','FontSize',12)
-% xlabel(ax2,'Time', ...
-%     'Interpreter','latex','FontSize',12)
-
-ax2.FontName = 'Times';
-ax2.FontSize = 11;
-ax2.LineWidth = 1.0;
-ax2.Box = 'on';
-ax2.TickLabelInterpreter = 'latex';
-grid(ax2,'on')
-ax2.GridAlpha = 0.12;
-ax2.MinorGridAlpha = 0.08;
-
-% ---- Shared formatting
-linkaxes([ax1, ax2],'x')
-xlim(ax1,[dt_plot(1) dt_plot(end)])
-
-% ---- Section labels centered in each interval on BOTH subplots
-section_edges = [t_start, t_train_end, t_val_end, t_test_end];
-section_names = {'Training', 'Validation', 'Test'};
-
-for ax = [ax1, ax2]
-    yl = ylim(ax);
-    y_text = yl(2) - 0.08*(yl(2)-yl(1));
-
-    for k = 1:numel(section_names)
-        t_mid = section_edges(k) + (section_edges(k+1) - section_edges(k))/2;
-        x_text = ruler2num(t_mid, ax.XAxis);
-
-        text(ax, x_text, y_text, section_names{k}, ...
-            'Interpreter', 'latex', ...
-            'HorizontalAlignment', 'center', ...
-            'VerticalAlignment', 'top', ...
-            'FontSize', 11, ...
-            'FontWeight', 'bold', ...
-            'Color', [0.25 0.25 0.25], ...
-            'BackgroundColor', 'w', ...
-            'Margin', 2);
-    end
-end
-
-% Set limits explicitly
-xlim(ax2, [dt_plot(1) dt_plot(end)])
-
-% Choose a regular tick spacing
-tick_main = dateshift(dt_plot(1), 'start', 'day'):caldays(7):dateshift(dt_plot(end), 'start', 'day');
-
-% Force inclusion of start and end of the plotted interval
-tick_all = unique([dt_plot(1), tick_main]);
-
-% Apply to both subplots
-xticks(ax1, tick_all)
-xticks(ax2, tick_all)
-
-% Optional: cleaner date formatting
-xtickformat(ax2, 'dd-MMM')
-xtickformat(ax1, 'dd-MMM')
-% ---- Export
-exportgraphics(h9, 'ambient_solar_publication.pdf', 'ContentType', 'vector')
+    % % ---- Slice settings
+    slice_start_hours = 500;
+    slice_start_idx = round(slice_start_hours / Ts_hrs);
+    % 
+    % usable_data_length = length(dt) - slice_start_idx;
+    % train_ratio = 0.10;
+    % val_ratio   = 0.05;
+    % test_ratio  = 0.10;
+    % 
+    % train_slice_length = int64(usable_data_length * train_ratio);
+    % train_slice_end_idx = slice_start_idx + train_slice_length;
+    % 
+    % val_slice_length = int64(usable_data_length * val_ratio);
+    % val_slice_end_idx = train_slice_end_idx + val_slice_length;
+    % 
+    % test_slice_length = int64(usable_data_length * test_ratio);
+    % test_slice_end_idx = val_slice_end_idx + test_slice_length;
+    % 
+    % % ---- Time markers
+    % t_start = dt(slice_start_idx);
+    % t_train_end = dt(train_slice_end_idx);
+    % t_val_end   = dt(val_slice_end_idx);
+    % t_test_end  = dt(test_slice_end_idx);
+    % 
+    % % ---- Data window
+    % idx = slice_start_idx:test_slice_end_idx;
+    % dt_plot     = dt(idx);
+    % Tamb_plot   = Tamb(idx);
+    % SolRad_plot = SolRad(idx);
+    % 
+    % % ---- Figure
+    % h9 = figure('Color','w', ...
+    %             'Units','centimeters', ...
+    %             'Position',[2 2 24 12]);
+    % 
+    % tl = tiledlayout(2,1,'TileSpacing','compact','Padding','compact');
+    % 
+    % % ---- Top subplot: Solar radiation
+    % ax1 = nexttile;
+    % plot(ax1, dt_plot, SolRad_plot, ...
+    %     'Color',[0.85 0.33 0.10], ...
+    %     'LineWidth',1.4);
+    % hold(ax1,'on')
+    % % xline(ax1, t_start,     '--k', 'LineWidth',2);
+    % xline(ax1, t_train_end, '--k', 'LineWidth',2);
+    % xline(ax1, t_val_end,   '--k', 'LineWidth',2);
+    % % xline(ax1, t_test_end,  '--k', 'LineWidth',2);
+    % hold(ax1,'off')
+    % 
+    % ylabel(ax1,'Solar radiation [W/m$^2$]', ...
+    %     'Interpreter','latex','FontSize',12)
+    % title(ax1,'Solar Radiation and Ambient Temperature -- Rotterdam Airport 2021', ...
+    %     'Interpreter','latex','FontSize',13,'FontWeight','bold')
+    % 
+    % ax1.FontName = 'Times';
+    % ax1.FontSize = 11;
+    % ax1.LineWidth = 1.0;
+    % ax1.Box = 'on';
+    % ax1.TickLabelInterpreter = 'latex';
+    % grid(ax1,'on')
+    % ax1.GridAlpha = 0.12;
+    % ax1.MinorGridAlpha = 0.08;
+    % ax1.XTickLabel = [];   % hide top x tick labels
+    % 
+    % % ---- Bottom subplot: Ambient temperature
+    % ax2 = nexttile;
+    % plot(ax2, dt_plot, Tamb_plot, ...
+    %     'Color',[0 0.45 0.74], ...
+    %     'LineWidth',1.4);
+    % hold(ax2,'on')
+    % % xline(ax2, t_start,     '--k', 'LineWidth',1.2);
+    % xline(ax2, t_train_end, '--k', 'LineWidth',2);
+    % xline(ax2, t_val_end,   '--k', 'LineWidth',2);
+    % % xline(ax2, t_test_end,  '--r', 'LineWidth',1.2);
+    % hold(ax2,'off')
+    % 
+    % ylabel(ax2,'Temperature [$^\circ$C]', ...
+    %     'Interpreter','latex','FontSize',12)
+    % % xlabel(ax2,'Time', ...
+    % %     'Interpreter','latex','FontSize',12)
+    % 
+    % ax2.FontName = 'Times';
+    % ax2.FontSize = 11;
+    % ax2.LineWidth = 1.0;
+    % ax2.Box = 'on';
+    % ax2.TickLabelInterpreter = 'latex';
+    % grid(ax2,'on')
+    % ax2.GridAlpha = 0.12;
+    % ax2.MinorGridAlpha = 0.08;
+    % 
+    % % ---- Shared formatting
+    % linkaxes([ax1, ax2],'x')
+    % xlim(ax1,[dt_plot(1) dt_plot(end)])
+    % 
+    % % ---- Section labels centered in each interval on BOTH subplots
+    % section_edges = [t_start, t_train_end, t_val_end, t_test_end];
+    % section_names = {'Training', 'Validation', 'Test'};
+    % 
+    % for ax = [ax1, ax2]
+    %     yl = ylim(ax);
+    %     y_text = yl(2) - 0.08*(yl(2)-yl(1));
+    % 
+    %     for k = 1:numel(section_names)
+    %         t_mid = section_edges(k) + (section_edges(k+1) - section_edges(k))/2;
+    %         x_text = ruler2num(t_mid, ax.XAxis);
+    % 
+    %         text(ax, x_text, y_text, section_names{k}, ...
+    %             'Interpreter', 'latex', ...
+    %             'HorizontalAlignment', 'center', ...
+    %             'VerticalAlignment', 'top', ...
+    %             'FontSize', 11, ...
+    %             'FontWeight', 'bold', ...
+    %             'Color', [0.25 0.25 0.25], ...
+    %             'BackgroundColor', 'w', ...
+    %             'Margin', 2);
+    %     end
+    % end
+    % 
+    % % Set limits explicitly
+    % xlim(ax2, [dt_plot(1) dt_plot(end)])
+    % 
+    % % Choose a regular tick spacing
+    % tick_main = dateshift(dt_plot(1), 'start', 'day'):caldays(7):dateshift(dt_plot(end), 'start', 'day');
+    % 
+    % % Force inclusion of start and end of the plotted interval
+    % tick_all = unique([dt_plot(1), tick_main]);
+    % 
+    % % Apply to both subplots
+    % xticks(ax1, tick_all)
+    % xticks(ax2, tick_all)
+    % 
+    % % Optional: cleaner date formatting
+    % xtickformat(ax2, 'dd-MMM')
+    % xtickformat(ax1, 'dd-MMM')
+    % % ---- Export
+    % exportgraphics(h9, 'ambient_solar_publication.pdf', 'ContentType', 'vector')
 
     %% Plot Zone Mean Air Temperatures - Training Set (Subplots)
     % h10 = figure;
@@ -967,28 +953,28 @@ exportgraphics(h9, 'ambient_solar_publication.pdf', 'ContentType', 'vector')
     % exportgraphics(h11, filename, 'Resolution', 300)
 % 
 % 
-%     %% Write data to CSV
-% 
-%     write_file = 1;
-% 
-%     if write_file
-%         data_dir = '/home/l2late/stack/Master/Thesis/master-thesis-code/alpha_building_model/data/brcm_simulation_results/hysteresis_prbs/';
-%         first_csv_filename_part = 'five_room_1_year_Ts_';
-%         filename_only = [first_csv_filename_part, num2str(Ts_hrs), '_', char(u_type),'_Tmargin_',num2str(T_margin),'_real.csv'];
-%         brcm_csv_filename = fullfile(data_dir, filename_only);
-%         %brcm_csv_filename = [data_dir, first_csv_filename_part, num2str(Ts_hrs), '_', u_type, '_real.csv'];
-% 
-%         headers = {'Datetime','ZoneMeanAirTemperature 1', 'ZoneMeanAirTemperature 2', 'ZoneMeanAirTemperature 3', 'ZoneMeanAirTemperature 4', 'ZoneMeanAirTemperature 5', 'Environment', 'HeatInput 1', 'HeatInput 2', 'HeatInput 3', 'HeatInput 4', 'HeatInput 5','Total Solar Radiation'};
-% 
-%         % T = array2table([dt room_temps, t_amb, rad_inputs], 'VariableNames', headers);
-%         % T = table(dt, room_temps, t_amb, rad_inputs, 'VariableNames', headers);
-%         abs_rad_inputs = rad_inputs .* zone_areas'; 
-%         T = array2table([room_temps', Tamb, abs_rad_inputs',SolRad], 'VariableNames', headers(2:end));
-%         T = addvars(T, dt, 'Before', 1, 'NewVariableNames', headers{1});
-% 
-%         sliced_T = T(slice_start_idx:end, :);
-%         writetable(sliced_T, brcm_csv_filename);
-%     end
+    %% Write data to CSV
+
+    write_file = 1;
+
+    if write_file
+        data_dir = '../../../data/brcm_simulation_results/hysteresis_prbs/';
+        first_csv_filename_part = 'five_room_1_year_Ts_';
+        filename_only = [first_csv_filename_part, num2str(Ts_hrs), '_', char(u_type),'_Tmargin_',num2str(T_margin),'_real.csv'];
+        brcm_csv_filename = fullfile(data_dir, filename_only);
+        %brcm_csv_filename = [data_dir, first_csv_filename_part, num2str(Ts_hrs), '_', u_type, '_real.csv'];
+
+        headers = {'Datetime','ZoneMeanAirTemperature 1', 'ZoneMeanAirTemperature 2', 'ZoneMeanAirTemperature 3', 'ZoneMeanAirTemperature 4', 'ZoneMeanAirTemperature 5', 'Environment', 'HeatInput 1', 'HeatInput 2', 'HeatInput 3', 'HeatInput 4', 'HeatInput 5','Total Solar Radiation'};
+
+        % T = array2table([dt room_temps, t_amb, rad_inputs], 'VariableNames', headers);
+        % T = table(dt, room_temps, t_amb, rad_inputs, 'VariableNames', headers);
+        abs_rad_inputs = rad_inputs .* zone_areas'; 
+        T = array2table([room_temps', Tamb, abs_rad_inputs',SolRad], 'VariableNames', headers(2:end));
+        T = addvars(T, dt, 'Before', 1, 'NewVariableNames', headers{1});
+
+        sliced_T = T(slice_start_idx:end, :);
+        writetable(sliced_T, brcm_csv_filename);
+    end
  end
 
 %% plot Zone Mean Air Temperatures at the over the training set
