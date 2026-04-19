@@ -16,32 +16,6 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 readonly BUILD_CONTEXT="$SCRIPT_DIR/../"
 readonly DOCKERFILE_PATH="$SCRIPT_DIR/../docker/Dockerfile.train"
 
-# main() {
-# 	check_dependencies
-#
-# 	# Use the first argument as the version, or default to the short git commit hash.
-# 	local version
-# 	version=${1:-$(git -C "$BUILD_CONTEXT" rev-parse --short HEAD)}
-# 	echo "INFO: Using version tag: $version"
-#
-# 	local image_with_version_tag="$DOCKER_REPO/$IMAGE_NAME:$version"
-# 	local image_with_latest_tag="$DOCKER_REPO/$IMAGE_NAME:latest"
-#
-# 	echo "INFO: Building image with tags '$version' and 'latest'..."
-# 	docker build \
-# 		--progress=plain \
-# 		-t "$image_with_version_tag" \
-# 		-t "$image_with_latest_tag" \
-# 		-f "$DOCKERFILE_PATH" \
-# 		"$BUILD_CONTEXT"
-#
-# 	echo "INFO: Pushing both tags to Docker repository..."
-# 	docker push "$image_with_version_tag"
-# 	docker push "$image_with_latest_tag"
-#
-# 	echo "✅ Successfully built and pushed $DOCKER_REPO/$IMAGE_NAME with tags '$version' and 'latest'."
-# }
-
 main() {
 	check_dependencies
 
