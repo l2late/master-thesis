@@ -583,6 +583,12 @@ class LitMultiStepNeuralDiscreteODEModule(L.LightningModule):
 
         self.val_rmse_celsius.update(preds_c.reshape(-1), targets_c.reshape(-1))
 
+        preds_flat = preds.reshape(-1, self.num_zones)
+        targets_flat = targets.reshape(-1, self.num_zones)
+
+        self.vaf_metric.update(preds_flat, targets_flat)
+        self.nrmse.update(preds_flat, targets_flat)
+
         error_celsius = preds_c - targets_c
         max_error_celsius = error_celsius.abs().max()
 
