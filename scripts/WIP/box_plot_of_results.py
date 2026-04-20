@@ -152,9 +152,9 @@ def get_all_runs_data(all_runs: wandb.apis.public.runs.Runs) -> pd.DataFrame:
     return df
 
 
-# wandb_runs_df = get_all_runs_data(all_runs)
+wandb_runs_df = get_all_runs_data(all_runs)
 
-# wandb_runs_df.to_parquet(Path(paths.output_dir) / "wandb_runs_data.parquet")
+wandb_runs_df.to_parquet(Path(paths.output_dir) / "wandb_runs_data.parquet")
 
 # %%
 
@@ -295,50 +295,3 @@ fig.savefig(
     box_plot_save_path / "violinplot_topology_lambda_noise.pdf", bbox_inches="tight"
 )
 plt.show()
-
-# for ax, (noise_label, df_sub) in zip(axes, df_plot.groupby("Noise", sort=False)):
-#     ax.set_title(noise_label, y=1.02)
-#     sns.boxplot(
-#         data=df_sub,
-#         x="Topology",
-#         y=metric_key,
-#         hue="Lambda Penalty",
-#         hue_order=lam_order,
-#         order=topos_order,
-#         palette=[colors[l] for l in lam_order],
-#         width=0.6,
-#         linewidth=1.0,
-#         fliersize=1.5,
-#         ax=ax,
-#     )
-#
-#     ax.set_title(noise_label)
-#     ax.set_xlabel("")
-#     ax.set_ylabel("RMSE" if ax is axes[0] else "")
-#     ax.grid(axis="y", linestyle="--", alpha=0.4)
-#     ax.legend_.remove()
-#
-# # Create a single legend outside the last axis
-# handles, labels = axes[-1].get_legend_handles_labels()
-# fig.legend(
-#     handles,
-#     labels,
-#     title="$\\lambda$ instability penalty coefficient",
-#     loc="upper center",
-#     bbox_to_anchor=(0.5, 1.0),
-#     ncol=2,
-#     frameon=False,
-# )
-# # Global x-label
-# fig.supxlabel("RMSE (°C) after 500 epochs, n=50 per experiment", y=0.02, fontsize=10)
-# fig.tight_layout(rect=[0, 0, 1, 0.85])  # reserve top 7% for legend
-# fig.subplots_adjust(bottom=0.18, wspace=0.15)
-#
-# # Save high-res for publication
-# # fig.savefig("boxplot_topology_lambda_noise.png", bbox_inches="tight")
-# box_plot_save_path = Path(paths.report_results_dir)
-# fig.savefig(
-#     box_plot_save_path / "boxplot_topology_lambda_noise.pdf", bbox_inches="tight"
-# )
-# plt.show()
-# # %%
