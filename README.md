@@ -74,7 +74,7 @@ uv run python scripts/train.py logger=wandb
 ## Training on cloud GPU with Vast AI
 
 While the model and dataset are very small and easily fit on a consumer GPU. You can speed up training with Cloud GPUs.
-Also, you can use the CUDA MPS to train multiple runs in parallel on a single GPU.
+Also, you can use the CUDA MPS to train multiple runs in parallel on a single GPU. See the related section below for more details.
 
 ### Docker image for training on Vast AI
 The repository provide necessary scripts build Docker images suitable for training on cloud GPUs with [Vast AI](https://vast.ai/).
@@ -91,14 +91,14 @@ This will build the Docker image and push it to Docker Hub. You can then use thi
 ```
 
 ## Training multiple runs in parallel with CUDA MPS
-If you have access to a GPU that supports CUDA MPS, you can train multiple runs in parallel on the same GPU.
+If you have access to a GPU that supports [CUDA MPS](https://docs.nvidia.com/deploy/mps/introduction.html), you can train multiple runs in parallel on the same GPU.
 
 The script `scripts/orchstraate_multi_process_on_single_gpu.py` can be used to orchestrate multiple training runs in parallel on a single GPU using CUDA MPS.
 
 ### Example:
 Running 50 runs with different seeds and two different variants of the experiment in parallel on a single GPU with a maximum of 10 jobs running in parallel.
 
-Be sure to adjust the `--max-jobs` option based on the available GPU memory in order to avoid throttling. You can monitor the GPU memory usage on a Vast AI instance with `nvtop`.
+Be sure to adjust the `--max-jobs` option based on the available CUDA cores and memory in order to avoid throttling. You can monitor the GPU memory usage on a Vast AI instance with `nvtop`.
 Tested on an NVIDIA RTX 3090 (5 jobs), 4090 (7 jobs) and 5090 (10 jobs).
 
 ```bash
@@ -113,6 +113,18 @@ uv run python scripts/orchestrate_multi_process_on_single_gpu.py \
 ```
 
 The last line allows you to specify hydra configs and overrides for each run.
-the `--variants` option allows you to specify different variants each run the experiment, which will be used to create different runs in wandb. In this example, we are creating two variants of the experiment, one with a non-stable building and one with a soft-stable building. The `trainer.max_epochs=500 logger=wandb 'datamodule.noise_stds=[2, 60]'` part allows you to specify additional hydra overrides that will be applied to all runs.
+the `--variants` option allows you to specify different variants for each run of the experiment (run sequentially). 
+In the example above, we create two variants of the experiment, one with no instability penalty and one with a the instability penalty active. The `trainer.max_epochs=500 logger=wandb 'datamodule.noise_stds=[2, 60]'` part allows you to specify additional hydra overrides that will be applied to all runs.
 See the script for more details on the available command line arguments.
 
+## Controller evaluation
+
+TODO
+
+### Controller hyperparameters tuning
+
+TODO
+
+### Comparison with Rule-Based Controller
+
+TODO
