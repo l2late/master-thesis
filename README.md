@@ -38,6 +38,7 @@ uv run python scripts/train.py
 
 The training script uses [Hydra](https://hydra.cc/) for configuration management.
 Have a look at the `conf` directory for the default configuration options.
+
 You can override any configuration option from the command line by using the syntax:
 ```bash
 uv run python scripts/train.py <config_option>=<value>
@@ -56,11 +57,18 @@ Example:
 uv run python scripts/train.py experiment=physical_1-to-1_non_stable
 ```
 
-## Options
-### Using Weights & Biases for logging
+## Using Weights & Biases for logging
 
-If you want to use Weights & Biases for logging, 
-You first need to set up your wandb account and get you API key, project name and entity name.
+The codebase relies on Weights & Biases (WandB) for logging and storing artifacts (configs and model checkpoints). This allows you to easily track and compare different runs of the experiment and keep all the relevant information in one place.
+As well as to decouple training from the local file system, which is especially useful when training on cloud GPUs.
+
+WandB offers a generous free tier for academics and students that should be more than sufficient for this project. 
+You can sign up for a free account on their [website](https://wandb.ai/site/research/).
+
+#### Setting up WandB
+You first need to create and set up your wandb account and get you API key, project name and entity name.
+Check the WandB documentation for how to do this.
+
 Then add these to the `.env_example` file and rename it to `.env`.
 Make sure it is not committed to version control as it contains sensitive information.
 The current `.gitignore` file already ignores the `.env` file, so you should be safe.
@@ -116,6 +124,10 @@ The last line allows you to specify hydra configs and overrides for each run.
 the `--variants` option allows you to specify different variants for each run of the experiment (run sequentially). 
 In the example above, we create two variants of the experiment, one with no instability penalty and one with a the instability penalty active. The `trainer.max_epochs=500 logger=wandb 'datamodule.noise_stds=[2, 60]'` part allows you to specify additional hydra overrides that will be applied to all runs.
 See the script for more details on the available command line arguments.
+
+## Evaluating the trained models
+
+TODO
 
 ## Controller evaluation
 

@@ -115,7 +115,7 @@ std_x_phys = 0.05  # State process noise: how much the RC model drifts per step 
 # If MPC has a steady-state error (e.g., room is always 0.5°C too cold): The disturbance isn't integrating fast enough. Increase std_d_phys.
 std_d_phys = 0.01  # Disturbance drift: how fast the unmeasured disturbance changes (very slow for this case as it should model slow ambient disturbances such as ground temperature, solar rad or ambient temp)
 # if MPC control actions are extremely jittery: The observer is reacting to sensor noise. Increase std_y_phys or decrease std_d_phys.
-std_y_phys = 0.0  # Measurement noise: None in this simulation
+std_y_phys = 1e-6  # Measurement noise: Very small in this simulation
 
 # Convert standard deviations to physical variances (°C^2)
 qx_phys = std_x_phys**2

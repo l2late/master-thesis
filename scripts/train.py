@@ -121,6 +121,7 @@ def train(cfg: DictConfig) -> float:
         trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
 
     # --- 5. Post-Training W&B Logging ---
+    # TODO: Logging only happens at the end of training, but we might want to log intermediate artifacts during training as well (e.g. after N epochs).
     if isinstance(logger, WandbLogger):
         log_wandb_artifacts(logger)
         # TODO: Call evaluation plotting functions here, save them to HydraConfig.get().runtime.output_dir
