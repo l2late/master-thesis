@@ -418,9 +418,23 @@ def analyze_observability_controlability_properties(A, B, C, label="System"):
     }
 
 
-def evaluate_model_predictions(ckpt_path: Path, config_path: Path) -> None:
+def evaluate_model_predictions(
+    ckpt_path: Path,
+    config_path: Path,
+    save_path: Path | None = None,
+    start_idx: int = 0,
+) -> None:
 
-    start_idx = 0
+    if save_path is None:
+        save_path = (
+            Path(paths.report_results_dir)
+            / cfg.model.topology
+            / f"lambda_{cfg.model.lambda_eigenvals_stability_penalty}"
+            / f"{cfg.datamodule.noise_stds}"
+        )
+        save_path.mkdir(parents=True, exist_ok=True)
+    else:
+        assert save_path.is_dir(), "save_path must be a directory"
 
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
@@ -436,14 +450,6 @@ def evaluate_model_predictions(ckpt_path: Path, config_path: Path) -> None:
     large_batch_cfg.paths = paths
     large_batch_cfg.datamodule.batch_size = 512
     large_batch_cfg.datamodule.num_workers = 1
-
-    save_path = (
-        Path(paths.report_results_dir)
-        / cfg.model.topology
-        / f"lambda_{cfg.model.lambda_eigenvals_stability_penalty}"
-        / f"{cfg.datamodule.noise_stds}"
-    )
-    save_path.mkdir(parents=True, exist_ok=True)
 
     if cfg.get("seed"):
         L.seed_everything(cfg.seed)
