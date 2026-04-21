@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from alphabuilding import constants as global_config
 from alphabuilding.control.brcm_building import (
-    validation_disturbances,
+    test_disturbances,
 )
 from alphabuilding.control.types import MpcConfig, SimulationPhase, TimedStateSpace
 from alphabuilding.domain.df_schemas import ControllerInput
@@ -71,7 +71,7 @@ def add_comfort_bounds_for_simulation(
 def get_controller_input_df(
     brcm_mat_file: Path, datamodule: L.LightningDataModule
 ) -> paDataFrame[ControllerInput]:
-    disturbances_df = validation_disturbances(brcm_mat_file, datamodule)
+    disturbances_df = test_disturbances(brcm_mat_file, datamodule)
     controller_input_df = add_comfort_bounds_for_simulation(disturbances_df)
     controller_input_df = ControllerInput.validate(controller_input_df)
     return controller_input_df
@@ -101,15 +101,17 @@ def load_learned_lti_ss(
 
     cfg = OmegaConf.load(config_path)
     cfg.paths = paths
+    # cfg.datamodule.
 
-    if "workspace" in cfg.datamodule.csv_file:
-        parts = cfg.datamodule.csv_file.split("/")[-3:]
-        local_path = paths.data_dir.joinpath(*parts)
-        cfg.datamodule.csv_file = str(local_path)
+    # if "workspace" in cfg.datamodule.csv_file:
+    #     parts = cfg.datamodule.csv_file.split("/")[-3:]
+    #     local_path = paths.data_dir.joinpath(*parts)
+    #     cfg.datamodule.csv_file = str(local_path)
 
     cfg.datamodule.device = "cpu"
     datamodule: BRCMTrajectoryLitDataModule = instantiate(cfg.datamodule)
-    datamodule.setup(stage="fit")
+    # datamodule.setup(stage="fit")
+    datamodule.setup()
 
     module = init_module_trained_from_cfg(cfg, checkpoint)
     module = module.cpu()  # Explicitly move to CPU

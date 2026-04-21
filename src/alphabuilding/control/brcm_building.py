@@ -97,21 +97,21 @@ def W_per_m2_to_W_per_room(u_radiators: np.ndarray) -> np.ndarray:
     return u_W_per_room
 
 
-def validation_disturbances(
+def test_disturbances(
     brcm_mat_file: Path, datamodule: L.LightningDataModule
 ) -> pd.DataFrame:
-    val_indices = tuple(idx + 500 for idx in datamodule.val_indices)
-    val_slice = slice(val_indices[0], val_indices[1])
+    test_indices = tuple(idx + 500 for idx in datamodule.test_indices)
+    test_slice = slice(test_indices[0], test_indices[1])
     data = read_brcm_data_file(brcm_mat_file)
     Tamb_seq = data["Tamb"]
     SolRad_seq = data["SolRad"]
     timestamps = data["time_posix"].astype("datetime64[s]").flatten()
     disturbances = np.hstack((Tamb_seq, SolRad_seq))
     df = pd.DataFrame(disturbances, columns=["Tamb", "SolRad"], index=timestamps)[
-        val_slice
+        test_slice
     ]
     assert df.isna().sum().sum() == 0, "NaN values found in disturbances dataframe"
-    assert df.shape[0] == val_indices[1] - val_indices[0], (
+    assert df.shape[0] == test_indices[1] - test_indices[0], (
         "Mismatch in number of validation disturbance samples"
     )
     assert df.shape[1] == 2, (

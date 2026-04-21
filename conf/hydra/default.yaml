@@ -13,3 +13,9 @@ sweep:
   dir: ${paths.log_dir}/${task_name}/multiruns/${now:%Y-%m-%d}_${now:%H-%M-%S}
   # subdir: ${hydra.job.num}
   subdir: ${shorten_path:${hydra.job.override_dirname}}
+
+# Fix: colorlog resets the filename to a relative path (known Hydra bug)
+job_logging:
+  handlers:
+    file:
+      filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log

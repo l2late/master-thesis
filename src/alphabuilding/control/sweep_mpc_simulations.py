@@ -1,7 +1,8 @@
 import os
+from pathlib import Path
 
 import optuna
-from optuna.storages import RDBStorage
+from optuna.storages import BaseStorage, RDBStorage
 
 from alphabuilding.application.use_cases.load_n4sid_model import load_matlab_n4sid_model
 
@@ -15,7 +16,6 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 # Hide all GPUs from PyTorch, we do this all on CPU
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-from pathlib import Path
 
 import numpy as np
 
@@ -28,6 +28,7 @@ from alphabuilding.control.controllers import (
     MPCSolverError,
     RbcController,
 )
+from alphabuilding.control.model_provision import ModelBundle
 from alphabuilding.control.performance_metrics import (
     total_comfort_violation_kelvin_hours,
     total_energy_consumption_watt_hour,
@@ -42,6 +43,7 @@ from alphabuilding.control.state_estimation import (
     conditioning_report,
     design_augmented_gain,
 )
+from alphabuilding.control.storage_strategy import StorageConfig, create_storage
 from alphabuilding.control.types import (
     MpcConfig,
     MpcSimulationConfig,
@@ -164,15 +166,15 @@ def run_single_mpc_experiment(
 
     # Load model with checkpoint
 
-    # FIX: for testing with the N4SID model, we load the model from the MATLAB .mat file instead of the PyTorch checkpoint.
-    # we do need the datamodule and hydra_cfg however, so we need to make sure that the matlab
-    # model was trained on the same data and with the same scalers as defined in the datamodule.
     sys_learned, dm, Kd_learned, hydra_cfg = load_learned_lti_ss(
         path=config.mpc.model_checkpoint, auto_select_last=False
     )
 
-    path_to_matlab_data = paths.data_dir / "matlab" / "optimal_lti_matrices.mat"
-    sys_learned, Kd_learned = load_matlab_n4sid_model(path_to_matlab_data)
+    # FIX: for testing with the N4SID model, we load the model from the MATLAB .mat file instead of the PyTorch checkpoint.
+    # we do need the datamodule and hydra_cfg however, so we need to make sure that the matlab
+    # model was trained on the same data and with the same scalers as defined in the datamodule.
+    # path_to_matlab_data = Path(paths.data_dir) / "matlab" / "optimal_lti_matrices.mat"
+    # sys_learned, Kd_learned = load_matlab_n4sid_model(path_to_matlab_data)
 
     scalers = Scalers(
         temp=dm.zone_temp_scaler,
@@ -188,9 +190,22 @@ def run_single_mpc_experiment(
     nd = 5  #  input disturbance for rooms
     nx = sys_learned.system.A.shape[0]
 
-    qx = 1e-4
-    qd = 1e-3
-    ry = 1e-3
+    std_x_phys = 0.01
+    std_d_phys = 0.05
+    std_y_phys = 1e-6
+
+    # Convert standard deviations to physical variances (°C^2)
+    qx_phys = std_x_phys**2
+    qd_phys = std_d_phys**2
+    ry_phys = std_y_phys**2
+
+    # The variance of the scaler
+    var_scale_factor = scalers.temp.base_scaler.scale_**2
+
+    # Translate to the "scaled world" for the Riccati solver
+    qx = qx_phys / var_scale_factor
+    qd = qd_phys / var_scale_factor
+    ry = ry_phys / var_scale_factor
 
     A_aug, B_aug, C_aug = build_augmented_system(A, B, C, nd)
 
@@ -353,7 +368,7 @@ def run_single_rbc_experiment(
 
 def empc_objective(
     trial: optuna.Trial,
-    model_checkpoint: Path,
+    model_bundle: ModelBundle,
     simulation_config: SimulationConfig,
     output_dir: Path,
 ) -> tuple[float, float]:
@@ -386,7 +401,7 @@ def empc_objective(
     # horizon_hours = trial.suggest_categorical(
     #     "horizon_hours", [8]
     # )  # MPC horizons in hours
-    horizon_hours = 16
+    horizon_hours = 24
     horizon = horizon_hours * 4
 
     # Optional, margins for the min and max soft temperature consstraints.
@@ -399,7 +414,7 @@ def empc_objective(
     # Construct your simulation configuration
     config = MpcSimulationConfig(
         mpc=MpcConfig(
-            model_checkpoint=model_checkpoint,
+            model_checkpoint=model_bundle.run_dir,
             horizon=horizon,
             slack_weights=np.array(slack_weights),
             R_weights=np.array(R_weights),
@@ -423,25 +438,35 @@ def empc_objective(
 
 def optimize_optuna_study_worker(
     study_name: str,
-    storage: str,
+    storage_config: StorageConfig,
     n_trials: int,
-    model_checkpoint: Path,
+    model_bundle: ModelBundle,
     simulation_config: SimulationConfig,
     output_dir: Path,
 ):
-    """Worker function executed by joblib to run trials sequentially within one process."""
-    # The study is loaded inside the isolated worker process to ensure thread safety
-    rdb_storage = RDBStorage(
-        url=storage,
-        engine_kwargs={
-            "connect_args": {"timeout": 60}
-        },  # Wait up to 60s for database locks to be released, which can happen when multiple processes are writing to the database simultaneously.
-    )
+    """Worker function executed by joblib to run trials sequentially within one process.
 
-    study = optuna.load_study(study_name=study_name, storage=rdb_storage)
+    Storage is created inside each worker to ensure clean state and proper
+    process isolation.  The StorageConfig is a frozen dataclass and
+    serialises cleanly across joblib workers.
+    """
+    storage = create_storage(storage_config)
+
+    if isinstance(storage, str):
+        # SQLite / MySQL URL string — wrap in RDBStorage
+        rdb = RDBStorage(
+            url=storage,
+            engine_kwargs={"connect_args": {"timeout": 60}},
+        )
+        study: BaseStorage = rdb
+    else:
+        # JournalStorage instance
+        study = storage
+
+    study = optuna.load_study(study_name=study_name, storage=study)
     study.optimize(
         lambda trial: empc_objective(
-            trial, model_checkpoint, simulation_config, output_dir
+            trial, model_bundle, simulation_config, output_dir
         ),
         n_trials=n_trials,
     )

@@ -1,158 +1,56 @@
 import ast
 import os
-from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import wandb
-from plotly.subplots import make_subplots
 
+from alphabuilding.infrastructure.wandb.utils import (
+    WandBPath,
+    get_all_runs_data,
+)
 from alphabuilding.utils.paths import paths
 
 # ---------------------------
 # Configuration
 # ---------------------------
-ENTITY = os.environ["WANDB_ENTITY"]
-PROJECT = os.environ["WANDB_PROJECT"]
+wandb_path = WandBPath(
+    entity=os.environ["WANDB_ENTITY"], project=os.environ["WANDB_PROJECT"]
+)
 
-group_key = "experiment_name"  # None
-metric_key = "val/rmse_celsius"  # None
+group_key = "experiment_name"
+metric_key = "val/rmse_celsius"
 
 # %%
 
-project_path = f"{ENTITY}/{PROJECT}"
+epochs = 499
 run_filters = {
     "state": "finished",
-    "summary_metrics.epoch": {"$eq": 499},
+    "summary_metrics.epoch": {"$eq": epochs},
     "config.model.topology": {
         "$in": ["FULLY_CONNECTED_ONE_TO_ONE", "PHYSICAL_ONE_TO_ONE"]
     },
+    "config.seed": {"$in": list(range(1000, 1050))},
 }
 # %%
 
-# api = wandb.Api()
-# all_runs = api.runs(
-#     project_path,
-#     filters=run_filters,
-#     lazy=False,
-#     per_page=200,
-# )
+api = wandb.Api()
 
-# %%
-#
-#
-# def get_groups(runs) -> list[str]:
-#     return sorted({run.group for run in all_runs if run.group is not None})
-#
-#
-# groups = get_groups(all_runs)
+all_runs = api.runs(
+    wandb_path.project_path,
+    filters=run_filters,
+    # lazy=False, # lazy false is faster but can seem very slow
+    per_page=20,
+)
+
+# groups = sorted({run.group for run in all_runs if run.group is not None})
 #
 # print("Discovered groups:", groups)
-#
-# # For each group, find the run with the best (lowest) final RMSE and collect its information.
-#
-#
-# def get_best_run_for_group(
-#     group_name: str, metric_key: str
-# ) -> wandb.apis.public.runs.Run | None:
-#     print(f"Querying best run for group={g!r}")
-#     filters = run_filters | {
-#         "group": group_name,
-#     }
-#     runs = api.runs(
-#         f"{ENTITY}/{PROJECT}",
-#         filters=filters,
-#         order=f"+summary_metrics.{metric_key}",
-#     )
-#
-#     if len(runs) == 0:
-#         print(f"  No runs found for group {g!r}, skipping.")
-#         return None
-#
-#     best_run = runs[0]
-#     return best_run
-#
-#
-# def get_best_runs_per_group():
-#     best_rows = []
-#
-#     for g in groups:
-#         best_run = get_best_run_for_group(g, metric_key)
-#         if best_run is None:
-#             continue
-#
-#         rmse = best_run.summary.get(metric_key)
-#         if rmse is None:
-#             print(f"  Best run {best_run.id} has no {metric_key}, skipping.")
-#             continue
-#
-#         best_rows.append(
-#             {
-#                 group_key: g,
-#                 metric_key: rmse,
-#                 "run_id": best_run.id,
-#                 "run_name": best_run.name,
-#                 "run_path": "/".join(best_run.path),
-#                 "run_url": best_run.url,
-#             }
-#         )
-#
-#     df_best = pd.DataFrame(best_rows)
-#     return df_best
-#
-#
-# df_best = get_best_runs_per_group()
-#
-# print("\nBest run per group:")
-# print(df_best)
-# df_best.to_parquet(paths.output_dir / "wandb_best_runs_per_group.parquet")
-#
-#
+
 # %%
 
 
-def get_all_runs_data(all_runs: wandb.apis.public.runs.Runs) -> pd.DataFrame:
-    data = []
-    for ii, run in enumerate(all_runs):
-        print(f"Processing run {ii + 1}/{len(all_runs)}: Run ID {run.id}")
-        assert metric_key in run.summary, (
-            f"Run {run.id} is missing the summary metric '{metric_key}'"
-        )
-        group_name = run.group
-        final_rmse = run.summary.get(metric_key)
-
-        # Filter out runs that might have crashed before logging or are missing the config
-        if final_rmse is not None:
-            data.append(
-                {
-                    group_key: group_name,
-                    metric_key: final_rmse,
-                    "run_id": run.id,
-                    "run_name": run.name,
-                    "run_path": "/".join(run.path),
-                    "run_url": run.url,
-                    "epochs": run.summary["epoch"],  # stored as int like 499
-                    "topology": run.config["model"][
-                        "topology"
-                    ],  # stored as string like "FULLY_CONNECTED_ONE_TO_ONE"
-                    "noise_stds": run.config[
-                        "noise_stds"
-                    ],  # stored as string like "[0.0, 0.0]"
-                    "lambda_eigenvals_stability_penalty": run.config["model"][
-                        "lambda_eigenvals_stability_penalty"
-                    ],  # stored as int like 0 or 1
-                    "seed": run.config["seed"],  # stored as int like 1000, 1001, etc.
-                }
-            )
-
-    df = pd.DataFrame(data)
-
-    return df
-
-
-wandb_runs_df = get_all_runs_data(all_runs)
+wandb_runs_df = get_all_runs_data(all_runs, metric_key=metric_key, group_key=group_key)
 
 wandb_runs_df.to_parquet(Path(paths.output_dir) / "wandb_runs_data.parquet")
 
@@ -165,10 +63,10 @@ df = pd.read_parquet(
 
 # %%
 
-epochs_filter = 499
+epochs_filter = epochs
 
 df_filtered = df[df["epochs"] == epochs_filter].copy()
-df_filtered = df_filtered[df_filtered["seed"].isin(range(1000, 1050))].copy()
+# df_filtered = df_filtered[df_filtered["seed"].isin(range(1000, 1050))].copy()
 
 # Parse noise_stds strings like "[0.0, 0.0]" -> (0.0, 0.0)
 df_filtered["noise_stds"] = df_filtered["noise_stds"].apply(
@@ -295,3 +193,4 @@ fig.savefig(
     box_plot_save_path / "violinplot_topology_lambda_noise.pdf", bbox_inches="tight"
 )
 plt.show()
+print("Done")
