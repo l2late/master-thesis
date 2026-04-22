@@ -369,6 +369,10 @@ def run_single_rbc_experiment(
             base_output_dir=output_dir,
         )
 
+    results_df = results_df[
+        results_df["simulation_phase"] == SimulationPhase.EVALUATION
+    ]
+
     total_energy = total_energy_consumption_watt_hour(results_df)
     total_violation = total_comfort_violation_kelvin_hours(results_df)
 
