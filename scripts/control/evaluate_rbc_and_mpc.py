@@ -510,7 +510,7 @@ def main() -> None:
         controller_step_length_seconds / plant_step_length_seconds
     )
 
-    warm_up_days = 19
+    warm_up_days = 14
     warmup_steps = int(
         warm_up_days * 24 * controller_steps_per_hour * controller_steps_per_plant_step
     )

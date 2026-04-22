@@ -410,9 +410,7 @@ def empc_objective(
         "slack_weight", low=1e-1, high=1e4, log=True
     )
 
-    lambda_du = trial.suggest_float(
-        "lambda_du", low=1e1, high=1e5, log=True
-    )
+    lambda_du = trial.suggest_float("lambda_du", low=1e1, high=1e5, log=True)
 
     # horizon_hours = 4
     # horizon_hours = trial.suggest_categorical(
@@ -474,10 +472,10 @@ def rbc_objective(
     Returns (total_energy_wh, total_comfort_violation_Kh).
     """
     n_actuators = 5
-    u_max_value = trial.suggest_float("u_max", low=1.0, high=35.0, log=True)
-    u_max = np.ones(n_actuators) * u_max_value
+    # u_max_value = trial.suggest_float("u_max", low=1.0, high=35.0, log=True)
+    u_max = np.ones(n_actuators) * 35.0
 
-    deadband_value = trial.suggest_float("deadband", low=0.1, high=3.0, log=True)
+    deadband_value = trial.suggest_float("deadband", low=0.25, high=3.0)
     deadband = np.ones(n_actuators) * deadband_value
 
     config = MpcSimulationConfig(
