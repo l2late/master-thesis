@@ -166,6 +166,7 @@ class MpcConfig:
     horizon: int
     slack_weights: SlackWeights
     R_weights: ControlAction
+    lambda_du: float  # Weight on control input rate-of-change (smoothness penalty)
     margins: ControlAction | None = None
 
 
@@ -191,7 +192,7 @@ def generate_sweep_runs(
 
     for chkpt, h, s, r in combinations:
         mpc_config = MpcConfig(
-            model_checkpoint=chkpt, horizon=h, slack_weight=s, R_weight=r
+            model_checkpoint=chkpt, horizon=h, slack_weights=s, R_weights=r, lambda_du=10000.0
         )
         mpc_simulation_config = MpcSimulationConfig(
             mpc=mpc_config,

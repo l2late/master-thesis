@@ -1,34 +1,45 @@
 #!/usr/bin/env python
 """
-MPC Hyperparameter Optimisation — CLI Entry Point
+RBC Hyperparameter Optimisation — CLI Entry Point
 
-Sources a trained model from either a local Hydra run directory or WandB,
-then runs Optuna multi-objective optimisation over MPC hyperparameters
+Runs Optuna multi-objective optimisation over RBC hyperparameters
 (economic energy ↔ comfort violation Pareto front).
+
+Unlike MPC, RBC does NOT require a trained model — the controller logic is
+purely rule-based (hysteresis / dead-band).  The only reason a model is
+loaded is to satisfy the simulation harness, which needs a Luenberger
+observer and a data-module for test disturbances and scalers.  Any
+compatible checkpoint will serve this purpose.
+
+Optimised hyperparameters
+-------------------------
+- ``u_max``    : Maximum heating power per actuator in W/m² (shared across zones)
+- ``deadband`` : Hysteresis deadband in °C (shared across zones)
 
 Usage examples
 --------------
-WandB best-run (auto-select)::
+Local Hydra run directory -- model only needed for the simulation harness::
 
-    python scripts/control/mpc_hopt.py \\
-        --source wandb --auto-best --n-trials 5000
+    python scripts/control/rbc_hopt.py \\\\
+        --run-dir logs/train/runs/2026-03-24_17-37-19 \\\\
+        --n-trials 5000
 
 WandB specific run::
 
-    python scripts/control/mpc_hopt.py \\
-        --source wandb --run-id abc123xyz --n-trials 3000
+    python scripts/control/rbc_hopt.py \\\\
+        --entity my-org --project alpha-building \\\\
+        --run-id abc123xyz --n-trials 500
 
-Local Hydra run directory::
+WandB auto-best (pick best finished run)::
 
-    python scripts/control/mpc_hopt.py \\
-        --source local \\
-        --run-dir logs/train/runs/2026-03-24_17-37-19 \\
-        --n-trials 500
+    python scripts/control/rbc_hopt.py \\\\
+        --entity my-org --project alpha-building \\\\
+        --auto-best --n-trials 500
 
-Monitor live on Vast.ai (port-forward via SSH)::
+Monitor live::
 
-    optuna dashboard \\
-        --storage journal:///workspace/output/mpc_hopt/optuna_mpc.journal \\
+    optuna dashboard \\\\
+        --storage journal:///workspace/output/rbc_hopt/optuna_rbc.journal \\\\
         --host 0.0.0.0 --port 8080
 """
 
@@ -51,13 +62,15 @@ from alphabuilding.control.storage_strategy import (
     create_storage,
 )
 from alphabuilding.control.sweep_mpc_simulations import (
-    optimize_optuna_study_worker,
+    optimize_rbc_optuna_study_worker,
 )
 from alphabuilding.control.types import SimulationConfig
 from alphabuilding.utils.paths import paths
 
-# ── Default WandB filters ──────────────────────────────────────────────
-# Mirrors scripts/WIP/get_best_run_id_from_wandb.py
+# ── Default WandB filters for --auto-best ──────────────────────────
+# Must mirror the MPC hopt filters so that `--auto-best` returns the same
+# run ID.  This guarantees RBC and EMPC are evaluated on the same dataset
+# (datamodule scalers, test disturbances, comfort bounds, noise levels, …).
 DEFAULT_RUN_FILTERS = {
     "state": "finished",
     "summary_metrics.epoch": {"$eq": 499},
@@ -65,45 +78,41 @@ DEFAULT_RUN_FILTERS = {
     "config.model.lambda_eigenvals_stability_penalty": {"$eq": 1.0},
 }
 
-DEFAULT_METRIC_KEY = "val/rmse_celsius"
+# ── Default WandB coordinates ─────────────────────────────────────
+# Mirrors conf/logger/wandb.yaml so that `--auto-best` works out-of-the-box
+# and both MPC and RBC hopt default to the same project.
+DEFAULT_WANDB_ENTITY = os.environ.get("WANDB_ENTITY", "l2late")
+DEFAULT_WANDB_PROJECT = os.environ.get("WANDB_PROJECT", "BuildingThermalDynamics")
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="MPC Hyperparameter Optimisation",
+        description="RBC Hyperparameter Optimisation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
 
     # ── Model Source ───────────────────────────────────────────────
-    src = p.add_argument_group("Model source")
-    src.add_argument(
-        "--source",
-        choices=["local", "wandb"],
-        default="wandb",
-        help="Where to load the model from (default: wandb)",
-    )
+    # Model is ONLY needed for the simulation harness (observer + scalers).
+    # The RBC controller itself is model-free.
+    src = p.add_argument_group("Model source (simulation harness only)")
     src.add_argument(
         "--run-dir",
         type=Path,
-        help="Path to local Hydra run directory (required for --source local)",
+        default=None,
+        help="Path to local Hydra run directory containing checkpoints/.hydra",
     )
     src.add_argument(
-        "--entity",
-        default=os.environ.get("WANDB_ENTITY"),
-        help="WandB entity  (env: WANDB_ENTITY)",
+        "--run-id",
+        type=str,
+        default=None,
+        help="Specific WandB run_id",
     )
-    src.add_argument(
-        "--project",
-        default=os.environ.get("WANDB_PROJECT"),
-        help="WandB project (env: WANDB_PROJECT)",
-    )
-    src.add_argument("--run-id", help="Specific WandB run_id")
     src.add_argument(
         "--auto-best",
         action="store_true",
         default=True,
-        help="Auto-select the best run via metric + filters (default: enabled)",
+        help="Auto-select the best finished run (uses --entity / --project) — default: enabled",
     )
     src.add_argument(
         "--no-auto-best",
@@ -112,9 +121,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable auto-best run selection",
     )
     src.add_argument(
-        "--metric-key",
-        default=DEFAULT_METRIC_KEY,
-        help="Metric for --auto-best selection (default: %(default)s)",
+        "--entity",
+        default=DEFAULT_WANDB_ENTITY,
+        help="WandB entity  (default: %(default)s; env: WANDB_ENTITY)",
+    )
+    src.add_argument(
+        "--project",
+        default=DEFAULT_WANDB_PROJECT,
+        help="WandB project (default: %(default)s; env: WANDB_PROJECT)",
     )
     src.add_argument(
         "--download-dir",
@@ -161,7 +175,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--eval-days",
         type=int,
         default=7,
-        help="MPC evaluation period in days (default: %(default)s)",
+        help="Evaluation period in days (default: %(default)s)",
     )
     sim.add_argument(
         "--controller-timestep-min",
@@ -181,7 +195,7 @@ def _build_parser() -> argparse.ArgumentParser:
     out.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(paths.output_dir) / "mpc_hopt",
+        default=Path(paths.output_dir) / "rbc_hopt",
         help="Root output directory (default: %(default)s)",
     )
 
@@ -204,45 +218,42 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_model_provider(args: argparse.Namespace):
-    """Select and configure the appropriate ModelProvider."""
+    """Select and configure the appropriate ModelProvider.
 
-    if args.source == "local":
-        if args.run_dir is None:
-            raise SystemExit("Error: --source local requires --run-dir")
-        provider = LocalModelProvider(run_dir=args.run_dir)
+    RBC itself does not need a model -- this is only loaded to satisfy the
+    simulation harness (Luenberger observer + datamodule scalers / input data).
+    Any compatible model will serve this purpose.
+    """
+    if args.run_dir is not None:
+        return LocalModelProvider(run_dir=args.run_dir)
 
-    elif args.source == "wandb":
+    # WandB path
+    # Explicit --run-id overrides default --auto-best
+    if args.run_id is not None:
+        run_id = args.run_id
+    elif args.auto_best:
         if not args.entity or not args.project:
             raise SystemExit(
-                "Error: --source wandb requires --entity and --project "
+                "Error: --auto-best requires --entity and --project "
                 "(or set WANDB_ENTITY / WANDB_PROJECT env vars)"
             )
-
-        # Determine run_id
-        if args.auto_best:
-            wandb_path = resolve_best_wandb_run(
-                entity=args.entity,
-                project=args.project,
-                metric_key=args.metric_key,
-                run_filters=DEFAULT_RUN_FILTERS,
-            )
-            run_id = wandb_path.run_id
-        elif args.run_id:
-            run_id = args.run_id
-        else:
-            raise SystemExit("Error: --source wandb requires --auto-best or --run-id")
-
-        provider = WandBModelProvider(
+        wandb_path = resolve_best_wandb_run(
             entity=args.entity,
             project=args.project,
-            run_id=run_id,
-            cache_dir=args.download_dir,
+            run_filters=DEFAULT_RUN_FILTERS,
+        )
+        run_id = wandb_path.run_id
+    else:
+        raise SystemExit(
+            "Error: specify --run-dir, --run-id, or use --auto-best (default)"
         )
 
-    else:  # pragma: no cover — argparse guards this
-        raise ValueError(f"Unknown source: {args.source}")
-
-    return provider
+    return WandBModelProvider(
+        entity=args.entity,
+        project=args.project,
+        run_id=run_id,
+        cache_dir=args.download_dir,
+    )
 
 
 def main() -> None:
@@ -250,7 +261,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # ════════════════════════════════════════════
-    #  1. Resolve model source
+    #  1. Resolve model source (harness only)
     # ════════════════════════════════════════════
     provider = _resolve_model_provider(args)
     model_bundle = provider.provide()
@@ -273,10 +284,10 @@ def main() -> None:
     # ════════════════════════════════════════════
     #  3. Create Optuna study
     # ════════════════════════════════════════════
-    study_name = args.study_name or f"mpc_tuning_{model_bundle.run_dir.name}"
+    study_name = args.study_name or f"rbc_tuning_{model_bundle.run_dir.name}"
 
     storage_ext_map = {"sqlite": "db", "journal": "log", "mysql": "db"}
-    storage_path = output_dir / f"optuna_mpc.{storage_ext_map[args.storage]}"
+    storage_path = output_dir / f"optuna_rbc.{storage_ext_map[args.storage]}"
 
     storage_config = StorageConfig(
         storage_type=StorageType(args.storage),
@@ -325,7 +336,7 @@ def main() -> None:
     print(f"Parallelising {args.n_trials} trials across {n_jobs} workers…")
 
     Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(optimize_optuna_study_worker)(
+        delayed(optimize_rbc_optuna_study_worker)(
             study_name=study_name,
             storage_config=storage_config,
             n_trials=n_worker_trials,

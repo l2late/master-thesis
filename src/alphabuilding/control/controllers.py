@@ -122,6 +122,7 @@ class EconomicMPCController(Controller):
         horizon: int,
         R_weights: ControlAction,
         slack_weights: SlackWeights,
+        lambda_du: float,
         u_min_physical: ControlAction,
         u_max_physical: ControlAction,
         scalers: Scalers,
@@ -135,6 +136,7 @@ class EconomicMPCController(Controller):
             horizon: MPC prediction horizon (number of time steps at the model sampling time).
             R_weight: Weight for energy cost in the objective
             slack_weight: Weight for constraint violation penalties in the objective.
+            lambda_du: Weight on the control input rate-of-change penalty (smoothness).
             u_min_physical: Minimum control action in physical units as required by the plant (Watts per m2)
             u_max_physical: Maximum control action in physical units as required by the plant (Watts per m2)
             scalers: Scalers for normalizing inputs/outputs to the MPC's internal model space.
@@ -213,13 +215,16 @@ class EconomicMPCController(Controller):
             f"Effective slack_weight must have same shape rooms: ({self.ny},)"
         )
 
+        self.lambda_du = lambda_du
+
         self._setup_problem(
             R_weights=self.effective_R_weights,
             slack_weights=self.effective_slack_weight,
+            lambda_du=self.lambda_du,
         )
 
     def _setup_problem(
-        self, *, R_weights: ControlAction, slack_weights: SlackWeights
+        self, *, R_weights: ControlAction, slack_weights: SlackWeights, lambda_du: float
     ) -> None:
         """Initialize CVXPY variables, parameters, and problem."""
         # Decision variables
@@ -239,7 +244,7 @@ class EconomicMPCController(Controller):
 
         # Build objective and constraints
         objective = self._build_objective(
-            R_weights=R_weights, slack_weights=slack_weights
+            R_weights=R_weights, slack_weights=slack_weights, lambda_du=lambda_du
         )
         constraints = self._build_constraints()
 
@@ -250,7 +255,7 @@ class EconomicMPCController(Controller):
         return self.model.dt_in_seconds
 
     def _build_objective(
-        self, *, R_weights: ControlAction, slack_weights: SlackWeights
+        self, *, R_weights: ControlAction, slack_weights: SlackWeights, lambda_du: float
     ) -> cp.Minimize:
         """Economic objective: minimize energy cost + constraint violation penalties."""
 
@@ -273,12 +278,10 @@ class EconomicMPCController(Controller):
         #     )
         # )
 
-        lam_du = 10000  # tune this
-
         # Differences along time axis: shape (nu, horizon-1)
         du = self.u_var[:, 1:] - self.u_var[:, :-1]
         # Sum of squared moves over horizon
-        cost += lam_du * cp.sum_squares(du)
+        cost += lambda_du * cp.sum_squares(du)
 
         return cp.Minimize(cost)
 

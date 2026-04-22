@@ -1,16 +1,40 @@
+"""
+Evaluate and compare RBC and MPC controllers, extracting best hopt params
+from paired Optuna databases (mpc_tuning_<id> ↔ rbc_tuning_<id>).
+
+Usage
+-----
+    # Point at a directory containing extracted cloud hopt output:
+    uv run python scripts/control/evaluate_rbc_and_mpc.py --hopt-dir output/eval_hopt/
+
+    # Get help:
+    uv run python scripts/control/evaluate_rbc_and_mpc.py --help
+"""
+
+import argparse
+import json
 import logging
+import os
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
+from optuna.trial import FrozenTrial
 
 from alphabuilding import constants as global_config
 from alphabuilding.control.brcm_building import (
     BRCMBuildingSimulator,
-    validation_disturbances,
+    test_disturbances,
 )
 from alphabuilding.control.controllers import EconomicMPCController, RbcController
+from alphabuilding.control.model_provision import (
+    ModelBundle,
+    ModelProvider,
+    WandBModelProvider,
+)
 from alphabuilding.control.performance_metrics import hvac_control_performance_metrics
 from alphabuilding.control.simulation import run_simulation
 from alphabuilding.control.state_estimation import (
@@ -22,348 +46,593 @@ from alphabuilding.control.state_estimation import (
     design_augmented_gain,
 )
 from alphabuilding.control.types import SimulationConfig, SimulationPhase
-from alphabuilding.control.utils import (
-    get_controller_input_df,
-    load_learned_lti_ss,
-)
+from alphabuilding.control.utils import get_controller_input_df, load_learned_lti_ss
 from alphabuilding.control.visualization import (
     plot_observer_convergence,
     plot_simulation_results_multiple_controllers,
 )
 from alphabuilding.domain.types import Scalers
+from alphabuilding.infrastructure.optuna.discovery import find_paired_studies
 from alphabuilding.infrastructure.optuna.study_analysis import (
+    RankingStrategy,
     controller_params_from_trial,
     get_sorted_best_trials,
-    list_study_names,
 )
+from alphabuilding.infrastructure.optuna.visualization import plot_pareto_dominant
 from alphabuilding.utils.logging_config import setup_logging
 from alphabuilding.utils.paths import paths
 
+N_ACTUATORS = 5
 NP_ROOM_AREAS = np.array(global_config.ROOM_AREAS)
 
 torch.set_grad_enabled(False)
 
 
-setup_logging(level=logging.INFO)
-logging.getLogger("alphabuilding.control").setLevel(logging.INFO)
-
-# %%
-
-# ------------------------------------------------------------------------------------------------
-## MPC Settings
-mpc_horizon_hours = 16
-max_rad_power_W_m2 = 35.0  # Watts/m2 : make sure this is the same value as that used for the MPC hyperparameter optimization in `bayesian_optimization_mpc_weights.py`, since we will be comparing the MPC results to the RBC results with the same power limits, and we want to make sure the comparison is fair and that the expected RBC results we are comparing to were generated with the same power limits.
-u_min_W_m2 = np.zeros(5)
-u_min_W = NP_ROOM_AREAS * u_min_W_m2
-u_max_W_m2 = np.ones(5) * max_rad_power_W_m2
-u_max_W = NP_ROOM_AREAS * u_max_W_m2
-
-# ------------------------------------------------------------------------------------------------
-plant_step_length_seconds = 30
-# Controller model is discretized at 15 minute intervals, so we need to run the plant for 15 minutes between each controller step
-controller_step_length_seconds = 15 * 60
-controller_steps_per_hour = int(3600 // controller_step_length_seconds)
-assert controller_steps_per_hour == 4
-controller_steps_per_plant_step = (
-    controller_step_length_seconds / plant_step_length_seconds
-)
-
-## -----------------------------------------------------------------------------------------------
-## WARMUP AND SIMULATION SETTINGS
-warm_up_days = 14
-warmup_steps = int(
-    warm_up_days * 24 * controller_steps_per_hour * controller_steps_per_plant_step
-)  # warmup for the simulation for 15 days using only the RBC to allow building and the observer to converge before we start recording results for performance evaluation
-
-eval_days = 7
-eval_hours = eval_days * 24
-eval_steps = int(
-    eval_hours * controller_steps_per_hour * controller_steps_per_plant_step
-)
-
-# ------------------------------------------------------------------------------------------------
-sys_learned, dm, Kd_learned, cfg = load_learned_lti_ss(auto_select_last=False)
-
-scalers = Scalers(
-    temp=dm.zone_temp_scaler,
-    amb=dm.ambient_temp_scaler,
-    sol=dm.solar_radiation_scaler,
-    heat=dm.heat_input_scaler,
-)
-
-df = validation_disturbances(global_config.BRCM_MAT_FILE, dm)
-controller_input_df = get_controller_input_df(global_config.BRCM_MAT_FILE, dm)
-
-EXPECTED_RBC_TEST_DATA = paths.test_data_dir / "expected_rbc_simulation_results.parquet"
-
-expected_rbc_results_df = pd.read_parquet(EXPECTED_RBC_TEST_DATA)
-# Infer frequency because parquet files don't preserve it, and it's needed for the assertion to work correctly
-expected_rbc_results_df.index.freq = pd.infer_freq(expected_rbc_results_df.index)
-expected_rbc_results_df = expected_rbc_results_df[: eval_steps + 1]
-
-plant = BRCMBuildingSimulator.from_mat_file(global_config.BRCM_MAT_FILE)
-
-A = sys_learned.system.A
-B = sys_learned.system.B
-C = sys_learned.system.C
-
-nd = 5  #  input disturbance for rooms
-nx = sys_learned.system.A.shape[0]
-
-# If the state estimates overshoot the actual measurements during fast transients: The model is too stiff. Increase std_x_phys to allow the states to adapt faster.
-std_x_phys = 0.05  # State process noise: how much the RC model drifts per step (this might be higher given how the model is identified)
-# If MPC has a steady-state error (e.g., room is always 0.5°C too cold): The disturbance isn't integrating fast enough. Increase std_d_phys.
-std_d_phys = 0.01  # Disturbance drift: how fast the unmeasured disturbance changes (very slow for this case as it should model slow ambient disturbances such as ground temperature, solar rad or ambient temp)
-# if MPC control actions are extremely jittery: The observer is reacting to sensor noise. Increase std_y_phys or decrease std_d_phys.
-std_y_phys = 1e-6  # Measurement noise: Very small in this simulation
-
-# Convert standard deviations to physical variances (°C^2)
-qx_phys = std_x_phys**2
-qd_phys = std_d_phys**2
-ry_phys = std_y_phys**2
-
-# The scaler's standard deviation (how many °C equals "1.0" in the scaled world)
-# If scalers.temp was fitted on multiple columns, you can take the mean()
-sigma_temp = np.mean(scalers.temp.base_scaler.scale_)
-# The variance of the scaler
-var_scale_factor = sigma_temp**2
-
-# Translate to the "scaled world" for the Riccati solver
-qx = qx_phys / var_scale_factor
-qd = qd_phys / var_scale_factor
-ry = ry_phys / var_scale_factor
-
-A_aug, B_aug, C_aug = build_augmented_system(A, B, C, nd)
-
-## Sanity Checks
-conditioning_report(A_aug, C_aug, nd)
-rank, n_aug, is_obs = check_observability(A_aug, C_aug)
-print(f"Observability rank: {rank} / {n_aug}  →  fully observable: {is_obs}")
-modes = check_detectability_pbh(A_aug, C_aug)
-if not modes:
-    print("DETECTABLE ✓ — augmented observer design is feasible")
-else:
-    print(f"WARNING: {len(modes)} undetectable mode(s): {modes}")
+def fmt_duration(seconds: float) -> str:
+    """Render *seconds* as ``Hh MMm SS.sss`` plus raw total."""
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{int(h)}h {int(m):02}m {s:05.2f}s ({seconds:.2f}s total)"
 
 
-K_aug, Q_aug, R_y = design_augmented_gain(
-    A_aug, C_aug, nx=nx, nd=nd, qx=qx, qd=qd, ry=ry
-)
-
-print("K_aug shape:", K_aug.shape)  # expect (nx+nd, ny)
-print("eig((I - K C) A) (magnitudes):")
-eig_obs = np.linalg.eigvals((np.eye(nx + nd) - K_aug @ C_aug) @ A_aug)
-print(np.sort(np.abs(eig_obs))[::-1][:10])
-
-observer = AugmentedLuenbergerObserver(
-    A_aug=A_aug,
-    B_aug=B_aug,
-    C_aug=C_aug,
-    K_aug=K_aug,
-    nx=nx,
-    nd=nd,
-    # x0=np.zeros(nx),  # or plant.x[:nx] if you prefer
-    # start with true initial state for faster convergence in this test
-    x0=plant.x[:nx],
-    scalers=scalers,
-)
-
-# %%
-
-rbc_controller = RbcController(
-    n_actuators=5,
-    u_min=u_min_W_m2,
-    u_max=u_max_W_m2,
-    deadband=np.ones(5) * 0.5,
-)
-simulation_config = SimulationConfig(
-    warmup_steps=warmup_steps,
-    eval_steps=eval_steps,
-)
-
-# %%
-#
-rbc_results_df = run_simulation(
-    plant=plant,
-    warmup_controller=rbc_controller,
-    eval_controller=rbc_controller,
-    observer=observer,
-    config=simulation_config,
-    df=controller_input_df,
-)
-# # testing_rbc_results_df = rbc_results_df[: len(expected_rbc_results_df)][
-# #     expected_rbc_results_df.columns
-# # ]
-# # pd.testing.assert_frame_equal(
-# #     testing_rbc_results_df[: len(expected_rbc_results_df)], expected_rbc_results_df
-# # )  # for u_max = 50Watts
-
-# %%
-
-optuna_db_path = paths.log_dir / "mpc_hopt" / "offset-free" / "optuna_studies.db"
-assert optuna_db_path.exists(), f"Optuna database not found at {optuna_db_path}"
-
-# Discover available study names
-list_of_study_names = list_study_names(optuna_db_path)
-print(list_of_study_names)
-
-study_name = "mpc_tuning_with_augmented_observer_single_weights_no_margins"
-assert study_name in list_of_study_names, (
-    f"Study name '{study_name}' not found in database. Available studies: {list_of_study_names}"
-)
+@contextmanager
+def timed(label: str):
+    """Context manager: prints a formatted wall-clock duration on exit."""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        print(f"✅  {label} completed in {fmt_duration(elapsed)}")
 
 
-# %%
-
-# Unbiased: closest to the ideal point
-ranked = get_sorted_best_trials(
-    study_name=study_name,
-    db_path=optuna_db_path,
-    strategy="weighted_sum",
-    # strategy="utopia",
-    weights=[4, 5],  # [Comfort, Energy]
-)
-
-R_weights, slack_penalty_weights, margins = controller_params_from_trial(ranked[0])
-# R_weights = np.ones(5) * 132
-# slack_penalty_weights = np.ones(5) * 68
-margins = np.zeros(5)
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 
-mpc_controller = EconomicMPCController(
-    model=sys_learned,
-    horizon=mpc_horizon_hours * controller_steps_per_hour,
-    R_weights=R_weights,
-    slack_weights=slack_penalty_weights,
-    u_min_physical=u_min_W_m2,
-    u_max_physical=u_max_W_m2,
-    scalers=scalers,
-    margins=margins,
-)
+def rbc_params_from_trial(
+    trial: FrozenTrial,
+    *,
+    n_actuators: int = N_ACTUATORS,
+    u_max_override: float | None = None,
+    deadband_override: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Reconstruct RBC controller array params from an Optuna trial.
+
+    The RBC hopt study stores scalar params:
+    - ``u_max``      : maximum heating power per actuator (W/m²)
+    - ``deadband``   : hysteresis deadband (°C)
+
+    Both are broadcast to ``n_actuators``.
+
+    Optional overrides force a specific value instead of reading the trial.
+
+    Returns
+    -------
+    u_max : np.ndarray, shape (n_actuators,)
+    deadband : np.ndarray, shape (n_actuators,)
+    """
+    p = trial.params
+
+    if u_max_override is not None:
+        u_max = np.ones(n_actuators) * u_max_override
+    elif "u_max" in p:
+        u_max = np.ones(n_actuators) * p["u_max"]
+    else:
+        raise KeyError("Trial has no 'u_max' param and no override provided.")
+
+    if deadband_override is not None:
+        deadband = np.ones(n_actuators) * deadband_override
+    elif "deadband" in p:
+        deadband = np.ones(n_actuators) * p["deadband"]
+    else:
+        raise KeyError("Trial has no 'deadband' param and no override provided.")
+
+    return u_max, deadband
 
 
-start_time = time.time()
-mpc_results_df = run_simulation(
-    plant=plant,
-    warmup_controller=rbc_controller,
-    eval_controller=mpc_controller,
-    observer=observer,
-    config=simulation_config,
-    df=controller_input_df,
-)
-end_time = time.time()
-elapsed_time = end_time - start_time
-print(f"MPC simulation completed in {elapsed_time:.2f} seconds.")
+# --------------------------------------------------------------------------- #
+#  Performance-summary helpers (console + LaTeX / JSON)
+# --------------------------------------------------------------------------- #
+
+# Metric definitions shared by all output formats
+METRIC_DEFS = [
+    {
+        "label": "Energy consumption",
+        "col": "total_energy_watt_hour",
+        "unit": "Wh",
+    },
+    {
+        "label": "Comfort violation",
+        "col": "total_comfort_violation_kelvin_hours",
+        "unit": "K·h",
+    },
+    {
+        "label": "Peak power",
+        "col": "max_power_consumption_watt",
+        "unit": "W",
+    },
+]
 
 
-results = {
-    "RBC": rbc_results_df,
-    "MPC": mpc_results_df,
-}
+def _build_metric_summary(
+    rbc_perf_row: pd.Series,
+    mpc_perf_row: pd.Series,
+) -> list[dict]:
+    """Build list of dicts with RBC, MPC, and improvement for each metric."""
+    summary = []
+    for m in METRIC_DEFS:
+        rbc_val = float(rbc_perf_row[m["col"]])
+        mpc_val = float(mpc_perf_row[m["col"]])
+        improvement = (rbc_val - mpc_val) / rbc_val * 100
+        summary.append(
+            {
+                "label": m["label"],
+                "col": m["col"],
+                "unit": m["unit"],
+                "rbc": rbc_val,
+                "mpc": mpc_val,
+                "improvement_pct": improvement,
+            }
+        )
+    return summary
 
-# filter evaluation steps from results for plotting and performance evaluation
-evaluation_results = {
-    name: df[df["simulation_phase"] == SimulationPhase.EVALUATION]
-    for name, df in results.items()
-}
-rbc_results_df = evaluation_results["RBC"]
-mpc_results_df = evaluation_results["MPC"]
+
+def _print_metric_table(metric_summary: list[dict]) -> None:
+    """Print the performance summary to the console."""
+    width = 70
+    print("\n" + "━" * width)
+    print(f"{'Metric':<28s}  {'RBC':>10s}  {'MPC':>10s}  {'Improvement':>12s}")
+    print("─" * width)
+    for m in metric_summary:
+        sign = "+" if m["improvement_pct"] >= 0 else ""
+        unit_str = f"{m['label']} ({m['unit']})"
+        print(
+            f"{unit_str:<28s}"
+            f"  {m['rbc']:>10.2f}  {m['mpc']:>10.2f}"
+            f"  {sign}{m['improvement_pct']:>10.2f}%"
+        )
+    print("━" * width)
 
 
-mpc_fig = plot_simulation_results_multiple_controllers(results=evaluation_results)
-mpc_fig.show()
+def _write_latex_table(metric_summary: list[dict], path: Path) -> Path:
+    """Write a complete LaTeX ``table`` environment ready for ``\\input{}``.
 
-# %%
-#
-# obs_fig = plot_observer_convergence(mpc_results_df)
-# obs_fig.show()
-#
-# %%
-#
-rbc_performance_results = hvac_control_performance_metrics(rbc_results_df)
+    Requires the ``booktabs`` package (``\\usepackage{booktabs}``) in the
+    document preamble.
+    """
 
-rbc_performance_results = pd.concat(
-    {"rbc": rbc_performance_results}, names=["experiment_id"]
-)
-print(rbc_performance_results)
+    rows = []
+    for m in metric_summary:
+        sign = "+" if m["improvement_pct"] >= 0 else ""
+        imp_str = f"{sign}{m['improvement_pct']:.1f}"
+        rows.append(
+            f"  {m['label']} & "
+            f"${m['rbc']:.2f}$ & "
+            f"${m['mpc']:.2f}$ & "
+            f"${imp_str}\\,$\\% \\\\"
+        )
 
-# %%
+    rows_tex = "\n".join(rows)
 
-mpc_performance_results = hvac_control_performance_metrics(mpc_results_df)
-mpc_performance_results = pd.concat(
-    {"mpc": mpc_performance_results}, names=["experiment_id"]
-)
-print(mpc_performance_results)
-print("Done")
+    tex_content = (
+        r"""
+    \begin{table}[htbp]
+    \centering
+    \caption{Performance comparison: RBC vs. MPC}
+    \label{tab:controller_performance}
+    \begin{tabular}{lrrr}
+    \toprule
+    \textbf{Metric} & \textbf{RBC} & \textbf{MPC} & \textbf{Improvement $\Delta$} \\
+    \midrule
+    """
+        + rows_tex
+        + r"""
+    \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+    """
+    )
 
-# %%
-# Save results to CSV
-# test_file = "expected_rbc_simulation_results.parquet"
-# rbc_results_df.to_parquet(paths.test_data_dir / test_file)
-# rbc_results_df.to_parquet(
-#     paths.output_dir / "controller_experiments/rbc/rbc_simulation_results.parquet"
-# )
-# %%
-#
-# # Plot Pareto front with Optuna and Plotly, and add RBC point to the plot for comparison
-#
-# import optuna
-# import plotly.graph_objects as go
-# from optuna.visualization import plot_pareto_front
-#
-# study = optuna.load_study(study_name=study_name, storage=f"sqlite:///{optuna_db_path}")
-# fig = plot_pareto_front(
-#     study,
-#     target_names=["Energy Consumption (Watts)", "Comfort Violation (Kelvin hours)"],
-#     include_dominated_trials=True,
-#     axis_order=None,
-#     constraints_func=None,
-#     targets=None,
-# )
-# # Extract RBC objective values using confirmed column names
-# rbc_energy = rbc_performance_results.loc["rbc", "total_energy_watt_hour"].item()
-# rbc_comfort = rbc_performance_results.loc[
-#     "rbc", "total_comfort_violation_kelvin_hours"
-# ].item()
-#
-# fig.add_trace(
-#     go.Scatter(
-#         x=[rbc_energy],
-#         y=[rbc_comfort],
-#         mode="markers",
-#         name="RBC",
-#         showlegend=False,
-#         marker=dict(
-#             symbol="diamond",
-#             size=16,
-#             color="#E84545",  # strong but muted red
-#             line=dict(
-#                 color="white", width=3
-#             ),  # white outline separates it from background
-#         ),
-#     )
-# )
-# fig.add_annotation(
-#     x=rbc_energy,
-#     y=rbc_comfort,
-#     text="<b>RBC</b>",
-#     showarrow=False,
-#     yshift=30,
-#     xshift=30,
-#     font=dict(
-#         size=20,
-#         color="#E84545",  # matches the marker color
-#         family="Inter, Helvetica Neue, Arial, sans-serif",
-#     ),
-#     bgcolor="rgba(255, 255, 255, 1)",
-#     bordercolor="#E84545",  # border matches marker
-#     borderwidth=2,
-#     borderpad=4,
-# )
-# fig.update_layout(
-#     xaxis=dict(range=[550_000, 700_000]),
-#     yaxis=dict(range=[0, 200]),
-# )
-#
-#
-# %%
+    with open(path, "w") as f:
+        f.write(tex_content)
+    return path
+
+
+def _save_metrics_json(
+    rbc_perf_row: pd.Series,
+    mpc_perf_row: pd.Series,
+    metric_summary: list[dict],
+    path: Path,
+) -> Path:
+    """Save raw metrics + improvement as JSON (backwards-compatible)."""
+
+    def _convert(obj):
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+
+    perf_json = {
+        "rbc": {col: _convert(val) for col, val in rbc_perf_row.items()},
+        "mpc": {col: _convert(val) for col, val in mpc_perf_row.items()},
+        "comparison": [
+            {
+                "metric": m["label"],
+                "rbc": m["rbc"],
+                "mpc": m["mpc"],
+                "improvement_pct": m["improvement_pct"],
+            }
+            for m in metric_summary
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(perf_json, f, indent=2)
+    return path
+
+
+# --------------------------------------------------------------------------- #
+#  Optuna helpers
+# --------------------------------------------------------------------------- #
+
+
+def _sorted_best_trial(
+    db_path: Path,
+    study_name: str,
+    *,
+    strategy: RankingStrategy = RankingStrategy.WEIGHTED_SUM,
+    weights: list[float] | None = None,
+) -> "RankedTrial":
+    """Convenience: fetch the #1 ranked trial from a study."""
+    ranked = get_sorted_best_trials(
+        study_name=study_name,
+        db_path=db_path,
+        strategy=strategy,
+        weights=weights,
+    )
+    assert ranked, f"No best trials found in study '{study_name}'"
+    return ranked[0]
+
+
+# --------------------------------------------------------------------------- #
+#  Model resolution (WandB → local cache, reused by hopt scripts)
+# --------------------------------------------------------------------------- #
+
+
+def resolve_model_provider(
+    run_id: str,
+    *,
+    entity: str,
+    project: str,
+    download_dir: Path | None = None,
+) -> ModelBundle:
+    """Resolve model from WandB into the shared artifact cache.
+
+    ``WandBModelProvider`` downloads to ``{cache_dir}/{run_id}/`` which mirrors
+    a Hydra run directory.  Subsequent calls for the same ``run_id`` reuse
+    the already-cached checkpoint and config — no re-download.
+    """
+    provider = WandBModelProvider(
+        entity=entity,
+        project=project,
+        run_id=run_id,
+        cache_dir=download_dir,
+    )
+    return provider.provide()
+
+
+# --------------------------------------------------------------------------- #
+#  CLI
+# --------------------------------------------------------------------------- #
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description=(
+            "Evaluate and compare RBC and MPC controllers. "
+            "Discovers best hopt params from paired Optuna databases."
+        ),
+    )
+    default_hopt_dir = Path(
+        os.environ.get("HOPT_DIR", str(Path(paths.output_dir) / "eval_hopt"))
+    )
+    p.add_argument(
+        "--hopt-dir",
+        type=Path,
+        default=default_hopt_dir,
+        help=(
+            "Directory to scan recursively for paired Optuna .db files. "
+            "Auto-pairs mpc_tuning_<id> ↔ rbc_tuning_<id> studies and "
+            "extracts the best trial params from each. "
+            "Default: $HOPT_DIR or output/eval_hopt (relative to project root)."
+        ),
+    )
+
+    # ── WandB Model Source ────────────────────────────────────────
+    wb = p.add_argument_group("Model source (WandB)")
+    wb.add_argument(
+        "--entity",
+        default=os.environ.get("WANDB_ENTITY"),
+        help="WandB entity  (default: $WANDB_ENTITY)",
+    )
+    wb.add_argument(
+        "--project",
+        default=os.environ.get("WANDB_PROJECT"),
+        help="WandB project  (default: $WANDB_PROJECT)",
+    )
+    wb.add_argument(
+        "--download-dir",
+        type=Path,
+        default=None,
+        help="Local directory to cache WandB artifact downloads "
+        "(default: output/artifacts/wandb_cache)",
+    )
+    return p
+
+
+def _setup_logging() -> None:
+    setup_logging(level=logging.INFO)
+    logging.getLogger("alphabuilding.control").setLevel(logging.INFO)
+
+
+# --------------------------------------------------------------------------- #
+#  main
+# --------------------------------------------------------------------------- #
+
+
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    _setup_logging()
+
+    # ── 1. Discover paired studies ───────────────────────────────
+    paired = find_paired_studies(args.hopt_dir)
+    if not paired:
+        raise SystemExit(
+            f"\nNo paired MPC↔RBC studies found under {args.hopt_dir}. "
+            f"Expected study names matching 'mpc_tuning_<id>' and 'rbc_tuning_<id>'."
+        )
+    p = paired[0]
+    print(f"\n🔍  Found paired studies (run_id={p.run_id}):")
+    print(f"   MPC study : {p.mpc_study}  (db: {p.mpc_db})")
+    print(f"   RBC study : {p.rbc_study}  (db: {p.rbc_db})")
+
+    # ── 2. Resolve model from WandB (reuses existing cache) ──────
+    if not args.entity or not args.project:
+        raise SystemExit(
+            "\nError: --entity and --project are required to resolve the model checkpoint.\n"
+            "Set WANDB_ENTITY / WANDB_PROJECT env vars or pass --entity / --project."
+        )
+    print(f"\n📦  Resolving model from WandB (run_id={p.run_id}) …")
+    model_bundle = resolve_model_provider(
+        p.run_id,
+        entity=args.entity,
+        project=args.project,
+        download_dir=args.download_dir,
+    )
+    print(f"   Model checkpoint : {model_bundle.run_dir / 'checkpoints' / 'last.ckpt'}")
+    print(f"   Hydra config     : {model_bundle.run_dir / '.hydra' / 'config.yaml'}")
+
+    # ── 3. Extract best hopt params ──────────────────────────────
+    # rbc_trial = _sorted_best_trial(p.rbc_db, p.rbc_study, weights=[4, 5])
+    # u_max_W_m2, deadband = rbc_params_from_trial(rbc_trial, n_actuators=N_ACTUATORS)
+    # Override to sensible value (1 degC) because RBC tuning leads to very small deadbands
+    rbc_deadband = np.ones(5)
+
+    mpc_trial = _sorted_best_trial(p.mpc_db, p.mpc_study, weights=[4, 5])
+    R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
+    lambda_du = mpc_trial.params.get("lambda_du", 0.0)
+
+    # print(f"\n📊  RBC best trial (rank={rbc_trial.rank}, score={rbc_trial.score:.4f})")
+    # print(f"   u_max     = {u_max_W_m2[0]:.4f} W/m²")
+    # print(f"   deadband  = {deadband[0]:.4f} °C")
+    # print("   (Note: deadband overridden to 1.0 °C for more realistic RBC behavior)")
+    print(f"\n📊  MPC best trial (rank={mpc_trial.rank}, score={mpc_trial.score:.4f})")
+    print(f"   R_weight     = {R_weights[0]:.4f}")
+    print(f"   slack_weight = {slack_weights[0]:.4f}")
+    print(f"   lambda_du    = {lambda_du:.4f}")
+    print(f"   margins      = {margins}")
+
+    # ── 3b. Pareto front of the MPC study ────────────────────────
+    pareto_fig = plot_pareto_dominant(
+        db_path=p.mpc_db,
+        study_name=p.mpc_study,
+        highlight_trial=mpc_trial,
+        target_names=["Energy (Wh)", "Comfort violation (K·h)"],
+        ylim=(0, 200),
+    )
+
+    # ── 4. Load model, plant, observer ───────────────────────────
+    # Now that we know the model path, pass it directly — no interactive prompt.
+    sys_learned, dm, Kd_learned, cfg = load_learned_lti_ss(
+        path=model_bundle.run_dir,
+        auto_select_last=False,
+    )
+
+    scalers = Scalers(
+        temp=dm.zone_temp_scaler,
+        amb=dm.ambient_temp_scaler,
+        sol=dm.solar_radiation_scaler,
+        heat=dm.heat_input_scaler,
+    )
+
+    df = test_disturbances(global_config.BRCM_MAT_FILE, dm)
+    controller_input_df = get_controller_input_df(global_config.BRCM_MAT_FILE, dm)
+
+    plant = BRCMBuildingSimulator.from_mat_file(global_config.BRCM_MAT_FILE)
+
+    # MPC Settings
+    mpc_horizon_hours = 24
+    max_rad_power_W_m2 = 35.0
+    u_min_W_m2 = np.zeros(N_ACTUATORS)
+    u_max_W_m2 = np.ones(N_ACTUATORS) * max_rad_power_W_m2
+
+    # Timing
+    plant_step_length_seconds = 30
+    controller_step_length_seconds = 15 * 60
+    controller_steps_per_hour = int(3600 // controller_step_length_seconds)
+    assert controller_steps_per_hour == 4
+    controller_steps_per_plant_step = (
+        controller_step_length_seconds / plant_step_length_seconds
+    )
+
+    warm_up_days = 19
+    warmup_steps = int(
+        warm_up_days * 24 * controller_steps_per_hour * controller_steps_per_plant_step
+    )
+    eval_days = 7
+    eval_steps = int(
+        eval_days * 24 * controller_steps_per_hour * controller_steps_per_plant_step
+    )
+
+    A = sys_learned.system.A
+    B = sys_learned.system.B
+    C = sys_learned.system.C
+    nd = 5  # input disturbance for rooms
+    nx = sys_learned.system.A.shape[0]
+
+    # Observer noise parameters
+    std_x_phys = 0.05
+    std_d_phys = 0.01
+    std_y_phys = 1e-6
+
+    qx_phys = std_x_phys**2
+    qd_phys = std_d_phys**2
+    ry_phys = std_y_phys**2
+    var_scale_factor = scalers.temp.base_scaler.scale_**2
+    qx = qx_phys / var_scale_factor
+    qd = qd_phys / var_scale_factor
+    ry = ry_phys / var_scale_factor
+
+    A_aug, B_aug, C_aug = build_augmented_system(A, B, C, nd)
+
+    conditioning_report(A_aug, C_aug, nd)
+    rank, n_aug, is_obs = check_observability(A_aug, C_aug)
+    print(f"\nObservability rank: {rank} / {n_aug}  →  fully observable: {is_obs}")
+    modes = check_detectability_pbh(A_aug, C_aug)
+    if not modes:
+        print("DETECTABLE ✓ — augmented observer design is feasible")
+    else:
+        print(f"WARNING: {len(modes)} undetectable mode(s): {modes}")
+
+    K_aug, Q_aug, R_y = design_augmented_gain(
+        A_aug, C_aug, nx=nx, nd=nd, qx=qx, qd=qd, ry=ry
+    )
+    print(f"K_aug shape: {K_aug.shape}")
+    eig_obs = np.linalg.eigvals((np.eye(nx + nd) - K_aug @ C_aug) @ A_aug)
+    print(f"eig((I - K C) A) magnitudes: {np.sort(np.abs(eig_obs))[::-1][:10]}")
+
+    observer = AugmentedLuenbergerObserver(
+        A_aug=A_aug,
+        B_aug=B_aug,
+        C_aug=C_aug,
+        K_aug=K_aug,
+        nx=nx,
+        nd=nd,
+        x0=plant.x[:nx],
+        scalers=scalers,
+    )
+
+    simulation_config = SimulationConfig(
+        warmup_steps=warmup_steps,
+        eval_steps=eval_steps,
+    )
+
+    # ── 5. Run RBC simulation ────────────────────────────────────
+    rbc_controller = RbcController(
+        n_actuators=N_ACTUATORS,
+        u_min=u_min_W_m2,
+        u_max=u_max_W_m2,
+        deadband=rbc_deadband,
+    )
+
+    print("\n━━━ Running RBC simulation ━━━")
+    with timed("RBC simulation"):
+        rbc_results_df = run_simulation(
+            plant=plant,
+            warmup_controller=rbc_controller,
+            eval_controller=rbc_controller,
+            observer=observer,
+            config=simulation_config,
+            df=controller_input_df,
+        )
+
+    # ── 6. Run MPC simulation ────────────────────────────────────
+    mpc_controller = EconomicMPCController(
+        model=sys_learned,
+        horizon=mpc_horizon_hours * controller_steps_per_hour,
+        R_weights=R_weights,
+        slack_weights=slack_weights,
+        lambda_du=lambda_du,
+        u_min_physical=u_min_W_m2,
+        u_max_physical=u_max_W_m2,
+        scalers=scalers,
+        margins=np.zeros(N_ACTUATORS) if margins is None else margins,
+    )
+
+    print("\n━━━ Running MPC simulation ━━━")
+    with timed("MPC simulation"):
+        mpc_results_df = run_simulation(
+            plant=plant,
+            warmup_controller=rbc_controller,
+            eval_controller=mpc_controller,
+            observer=observer,
+            config=simulation_config,
+            df=controller_input_df,
+        )
+
+    # ── 7. Filter, plot, and report ──────────────────────────────
+    results = {
+        "RBC": rbc_results_df,
+        "MPC": mpc_results_df,
+    }
+    evaluation_results = {
+        name: df[df["simulation_phase"] == SimulationPhase.EVALUATION]
+        for name, df in results.items()
+    }
+
+    mpc_fig = plot_simulation_results_multiple_controllers(results=evaluation_results)
+    mpc_fig.show()
+
+    # ── 7b. Performance metrics & comparison ────────────────────
+    rbc_perf_row = hvac_control_performance_metrics(evaluation_results["RBC"]).iloc[0]
+    mpc_perf_row = hvac_control_performance_metrics(evaluation_results["MPC"]).iloc[0]
+
+    metric_summary = _build_metric_summary(rbc_perf_row, mpc_perf_row)
+    _print_metric_table(metric_summary)
+
+    # ── 8. Save results ──────────────────────────────────────────
+    results_dir = Path(paths.output_dir) / "eval_hopt" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    mpc_fig.savefig(results_dir / "simulation_results.pdf")
+    print(
+        f"\n📄  Simulation results plot saved to {results_dir / 'simulation_results.pdf'}"
+    )
+
+    pareto_fig.savefig(results_dir / "mpc_pareto_front.pdf")
+    print(f"📄  MPC Pareto front saved to {results_dir / 'mpc_pareto_front.pdf'}")
+
+    tbl_path = _write_latex_table(metric_summary, results_dir / "performance_table.tex")
+    print(f"📘  LaTeX table saved to {tbl_path}")
+
+    _save_metrics_json(
+        rbc_perf_row,
+        mpc_perf_row,
+        metric_summary,
+        results_dir / "performance_metrics.json",
+    )
+
+    # ── 9. Show Pareto figure ────────────────────────────────────
+    pareto_fig.show()
+
+    print("Done")
+
+
+if __name__ == "__main__":
+    main()

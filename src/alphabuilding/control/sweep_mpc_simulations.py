@@ -257,6 +257,7 @@ def run_single_mpc_experiment(
         horizon=config.mpc.horizon,
         R_weights=config.mpc.R_weights,
         slack_weights=config.mpc.slack_weights,
+        lambda_du=config.mpc.lambda_du,
         u_min_physical=u_min_W_m2,
         u_max_physical=u_max_W_m2,
         scalers=scalers,
@@ -294,23 +295,31 @@ def run_single_mpc_experiment(
     return total_energy, total_violation
 
 
-# TODO: this is a dirty minimal duplicate of the MPC experiment function, just to run RBC as a reference.
-# Needs refactor to remove duplication.
 def run_single_rbc_experiment(
     *,
     config: MpcSimulationConfig,
     output_dir,
     save_results=False,
+    # Optuna trial for pruning callbacks (optional)
+    trial: optuna.Trial | None = None,
+    # Hyperparameter overrides (used during hopt)
+    u_max_override: np.ndarray | None = None,
+    deadband_override: np.ndarray | None = None,
 ):
     """
-    Runs a single MPC simulation for specific parameters.
-    This function isolates the logic to be run in a separate process.
+    Runs a single RBC simulation for specific parameters.
+
+    Args:
+        config: Simulation configuration (model checkpoint is used for observer).
+        output_dir: Directory for optional result saving.
+        save_results: Whether to persist simulation output.
+        trial: Optuna trial for intermediate reporting / pruning.
+        u_max_override: Override per-actuator max heating power (W/m²).
+        deadband_override: Override per-actuator hysteresis band (°C).
     """
-    # Load plant inside worker to ensure thread safety and fresh state
     brcm_mat_file = global_config.BRCM_MAT_FILE
     plant = BRCMBuildingSimulator.from_mat_file(brcm_mat_file)
 
-    # Load model with checkpoint
     sys_learned, dm, L_learned, hydra_cfg = load_learned_lti_ss(
         path=config.mpc.model_checkpoint, auto_select_last=False
     )
@@ -323,27 +332,27 @@ def run_single_rbc_experiment(
     )
 
     observer = FilteringLuenbergerObserver(
-        A=sys_learned.system.A,
-        B=sys_learned.system.B,
+        Ad=sys_learned.system.A,
+        Bd=sys_learned.system.B,
         C=sys_learned.system.C,
-        L=L_learned,
+        Kd=L_learned,
         x0=np.zeros(sys_learned.system.A.shape[0]),
         scalers=scalers,
     )
 
     u_min_W_m2 = np.zeros(5)
-    u_max_W_m2 = np.ones(5) * 50.0
+    u_max_W_m2 = u_max_override if u_max_override is not None else np.ones(5) * 50.0
+    db = deadband_override if deadband_override is not None else np.ones(5) * 0.5
 
     rbc_controller = RbcController(
         n_actuators=5,
         u_min=u_min_W_m2,
         u_max=u_max_W_m2,
-        deadband=np.ones(5) * 0.5,
+        deadband=db,
     )
 
     controller_input_df = get_controller_input_df(brcm_mat_file, dm)
 
-    # Run simulation
     results_df = run_simulation(
         plant=plant,
         warmup_controller=rbc_controller,
@@ -351,9 +360,9 @@ def run_single_rbc_experiment(
         observer=observer,
         df=controller_input_df,
         config=config.simulation,
+        optuna_pruning_callback=None,  # can be wired up later if needed
     )
 
-    # TODO: output result from function. save resuls outside
     if save_results:
         save_rbc_experiment(
             results_df=results_df,
@@ -397,6 +406,10 @@ def empc_objective(
         "slack_weight", low=1e-1, high=1e4, log=True
     )
 
+    lambda_du = trial.suggest_float(
+        "lambda_du", low=1e1, high=1e5, log=True
+    )
+
     # horizon_hours = 4
     # horizon_hours = trial.suggest_categorical(
     #     "horizon_hours", [8]
@@ -418,6 +431,7 @@ def empc_objective(
             horizon=horizon,
             slack_weights=np.array(slack_weights),
             R_weights=np.array(R_weights),
+            lambda_du=lambda_du,
             margins=np.array(margins),
         ),
         simulation=simulation_config,
@@ -434,6 +448,57 @@ def empc_objective(
             np.inf,
             np.inf,
         )  # Return a very bad score if the MPC optimization fails, so that Optuna learns to avoid that region of the search space
+
+
+# --------------------------------------------------------------------------- #
+#  RBC Hyperparameter Optimisation                                            #
+# --------------------------------------------------------------------------- #
+
+
+def rbc_objective(
+    trial: optuna.Trial,
+    model_bundle: ModelBundle,
+    simulation_config: SimulationConfig,
+    output_dir: Path,
+) -> tuple[float, float]:
+    """Optuna multi-objective function for RBC hyperparameter tuning.
+
+    Searches over:
+      - u_max       : per-actuator maximum heating power (W/m²)
+      - deadband    : per-actuator hysteresis deadband (°C)
+
+    Returns (total_energy_wh, total_comfort_violation_Kh).
+    """
+    n_actuators = 5
+    u_max_value = trial.suggest_float("u_max", low=1.0, high=35.0, log=True)
+    u_max = np.ones(n_actuators) * u_max_value
+
+    deadband_value = trial.suggest_float("deadband", low=0.1, high=3.0, log=True)
+    deadband = np.ones(n_actuators) * deadband_value
+
+    config = MpcSimulationConfig(
+        mpc=MpcConfig(
+            model_checkpoint=model_bundle.run_dir,
+            horizon=0,
+            slack_weights=np.zeros(n_actuators),
+            R_weights=np.zeros(n_actuators),
+            lambda_du=0.0,
+        ),
+        simulation=simulation_config,
+    )
+
+    try:
+        total_energy, total_violation = run_single_rbc_experiment(
+            config=config,
+            output_dir=output_dir,
+            save_results=False,
+            trial=trial,
+            u_max_override=u_max,
+            deadband_override=deadband,
+        )
+        return total_energy, total_violation
+    except Exception:
+        return (np.inf, np.inf)
 
 
 def optimize_optuna_study_worker(
@@ -468,5 +533,36 @@ def optimize_optuna_study_worker(
         lambda trial: empc_objective(
             trial, model_bundle, simulation_config, output_dir
         ),
+        n_trials=n_trials,
+    )
+
+
+def optimize_rbc_optuna_study_worker(
+    study_name: str,
+    storage_config: StorageConfig,
+    n_trials: int,
+    model_bundle: ModelBundle,
+    simulation_config: SimulationConfig,
+    output_dir: Path,
+):
+    """Worker function for RBC hyperparameter optimisation.
+
+    Identical structure to :func:`optimize_optuna_study_worker` but targets
+    the RBC objective function instead of MPC.
+    """
+    storage = create_storage(storage_config)
+
+    if isinstance(storage, str):
+        rdb = RDBStorage(
+            url=storage,
+            engine_kwargs={"connect_args": {"timeout": 60}},
+        )
+        study: BaseStorage = rdb
+    else:
+        study = storage
+
+    study = optuna.load_study(study_name=study_name, storage=study)
+    study.optimize(
+        lambda trial: rbc_objective(trial, model_bundle, simulation_config, output_dir),
         n_trials=n_trials,
     )

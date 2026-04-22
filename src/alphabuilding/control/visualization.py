@@ -196,7 +196,7 @@ def plot_simulation_results_multiple_controllers(
 
     # 4. Final Polish (Legends, Layout)
     # Add legend to Total Power
-    axes["total_power"].legend(loc="upper left", framealpha=1.0, edgecolor="black")
+    # axes["total_power"].legend(loc="upper left", framealpha=1.0, edgecolor="black")
 
     # Add legend to First Zone Temp (includes Comfort Range)
     axes["zones"][0][0].legend(
