@@ -78,31 +78,7 @@ def _build_pareto_dataframe(
     return df
 
 
-def _frontier_steps(df: pd.DataFrame) -> pd.DataFrame:
-    """Build L-shaped step-line coordinates for the Pareto frontier.
 
-    The input *df* is already in minimisation space (lower is better).
-    Sorting by x and walking descending creates the step staircase.
-    """
-    if len(df) < 2:
-        return df[["x", "y"]].copy()
-
-    sorted_df = df.sort_values("x").reset_index(drop=True)
-    xs, ys = [], []
-    for i, row in sorted_df.iterrows():
-        if i == 0:
-            xs.append(row["x"])
-            ys.append(row["y"])
-            continue
-
-        # Horizontal segment from previous point to current x
-        xs.append(row["x"])
-        ys.append(ys[-1])  # hold y
-        # Vertical segment to current y
-        xs.append(row["x"])
-        ys.append(row["y"])
-
-    return pd.DataFrame({"x": xs, "y": ys})
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -187,19 +163,17 @@ def plot_pareto_dominant(
     with sns.axes_style(style_context):
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Frontier step line
-        frontier = _frontier_steps(df)
-        if len(frontier) >= 2:
-            sns.lineplot(
-                data=frontier,
-                x="x",
-                y="y",
-                ax=ax,
+        # Simple line connecting Pareto points (sorted low-x → high-x)
+        if len(df) >= 2:
+            sorted_df = df.sort_values("x").reset_index(drop=True)
+            ax.plot(
+                sorted_df["x"].values,
+                sorted_df["y"].values,
                 color=_FRONTIER_COLOUR,
                 lw=1.5,
-                ls="--",
+                ls="-",
                 zorder=1,
-                label="Pareto frontier",
+                label="Pareto front",
             )
 
         # All dominant trials
