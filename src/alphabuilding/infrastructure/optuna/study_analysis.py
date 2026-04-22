@@ -230,7 +230,7 @@ def _get_sorted_best_trials_cached(
 def get_sorted_best_trials(
     study_name: str,
     db_path: Path,
-    strategy: RankingStrategy = RankingStrategy.UTOPIA,
+    strategy: RankingStrategy = RankingStrategy.WEIGHTED_SUM,
     weights: Sequence[float] | None = None,
     objective_idx: int = 0,
 ) -> list[RankedTrial]:

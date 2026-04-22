@@ -58,7 +58,12 @@ from alphabuilding.infrastructure.optuna.study_analysis import (
     controller_params_from_trial,
     get_sorted_best_trials,
 )
-from alphabuilding.infrastructure.optuna.visualization import plot_pareto_dominant
+from alphabuilding.infrastructure.optuna.visualization import (
+    MPC_STYLE,
+    RBC_STYLE,
+    ParetoStudy,
+    plot_pareto_dominant,
+)
 from alphabuilding.utils.logging_config import setup_logging
 from alphabuilding.utils.paths import paths
 
@@ -424,9 +429,14 @@ def main() -> None:
     # Override to sensible value (1 degC) because RBC tuning leads to very small deadbands
     rbc_deadband = np.ones(5) * 0.5
 
-    mpc_trial = _sorted_best_trial(p.mpc_db, p.mpc_study, weights=[4, 5])
+    mpc_trial = _sorted_best_trial(
+        p.mpc_db,
+        p.mpc_study,
+        weights=[5, 20],  # [Energy, Comfort]
+    )  # it works best to put more weight on comfort (10) than energy (9) to get a good controller.
     R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
     lambda_du = mpc_trial.params.get("lambda_du", 0.0)
+    lambda_du = 1000
 
     # print(f"\n📊  RBC best trial (rank={rbc_trial.rank}, score={rbc_trial.score:.4f})")
     # print(f"   u_max     = {u_max_W_m2[0]:.4f} W/m²")
@@ -437,16 +447,6 @@ def main() -> None:
     print(f"   slack_weight = {slack_weights[0]:.4f}")
     print(f"   lambda_du    = {lambda_du:.4f}")
     print(f"   margins      = {margins}")
-
-    # ── 3b. Pareto front of the MPC study ────────────────────────
-    pareto_fig = plot_pareto_dominant(
-        db_path=p.mpc_db,
-        study_name=p.mpc_study,
-        highlight_trial=mpc_trial,
-        target_names=["Energy (Wh)", "Comfort violation (K·h)"],
-        ylim=(0, 200),
-        xlim=(8e5, 1.2e6),
-    )
 
     # ── 4. Load model, plant, observer ───────────────────────────
     # Now that we know the model path, pass it directly — no interactive prompt.
@@ -607,6 +607,33 @@ def main() -> None:
     metric_summary = _build_metric_summary(rbc_perf_row, mpc_perf_row)
     _print_metric_table(metric_summary)
 
+    # ── 7c. Pareto fronts: MPC + RBC ─────────────────────────────
+    pareto_fig = plot_pareto_dominant(
+        studies=[
+            ParetoStudy(
+                db_path=p.mpc_db,
+                study_name=p.mpc_study,
+                label=MPC_STYLE[0],
+                colour=MPC_STYLE[1],
+            ),
+            ParetoStudy(
+                db_path=p.rbc_db,
+                study_name=p.rbc_study,
+                label=RBC_STYLE[0],
+                colour=RBC_STYLE[1],
+            ),
+        ],
+        target_names=("Energy (Wh)", "Comfort violation (K·h)"),
+        highlight={
+            "x": mpc_trial.trial.values[0],
+            "y": mpc_trial.trial.values[1],
+            "trial_number": mpc_trial.trial.number,
+            "rank": mpc_trial.rank,
+        },
+        ylim=(0, 50),
+        xlim=(8e5, 3.5e6),
+    )
+
     # ── 8. Save results ──────────────────────────────────────────
     results_dir = Path(paths.output_dir) / "eval_hopt" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -629,7 +656,6 @@ def main() -> None:
         results_dir / "performance_metrics.json",
     )
 
-    # ── 9. Show Pareto figure ────────────────────────────────────
     pareto_fig.show()
 
     print("Done")

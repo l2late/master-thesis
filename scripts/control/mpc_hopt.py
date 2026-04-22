@@ -42,8 +42,6 @@ from pathlib import Path
 import optuna
 from joblib import Parallel, delayed
 
-from alphabuilding.infrastructure.wandb.auto_best import resolve_best_wandb_run
-
 from alphabuilding.control.model_provision import LocalModelProvider, WandBModelProvider
 from alphabuilding.control.storage_strategy import (
     StorageConfig,
@@ -54,6 +52,7 @@ from alphabuilding.control.sweep_mpc_simulations import (
     optimize_optuna_study_worker,
 )
 from alphabuilding.control.types import SimulationConfig
+from alphabuilding.infrastructure.wandb.auto_best import resolve_best_wandb_run
 from alphabuilding.utils.paths import paths
 
 # ── Default WandB filters ──────────────────────────────────────────────
@@ -127,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     opt.add_argument(
         "--n-trials",
         type=int,
-        default=5000,
+        default=2000,
         help="Total number of optimisation trials (default: %(default)s)",
     )
     opt.add_argument(

@@ -1,14 +1,15 @@
 """Pareto-front visualization for multi-objective Optuna studies.
 
 Creates static publication-quality Pareto plots (seaborn / matplotlib)
-showing only non-dominated trials, with an optional highlight for a
-selected ranked trial (e.g. the output of ``_sorted_best_trial``).
+showing non-dominated trials for one or more studies, each with its own
+frontier line and colour.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,18 +20,27 @@ from matplotlib.figure import Figure
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
 
-from alphabuilding.infrastructure.optuna.study_analysis import (
-    RankedTrial,
-    _to_minimisation_space,
-)
-
 # ── colour palette ───────────────────────────────────────────────────────────
 
 _HIGHLIGHT_COLOUR = "#e74c3c"  # bold red
-_DOMINANT_COLOUR = "#3498db"  # calm blue
-_FRONTIER_COLOUR = "#7f8c8d"  # muted gray
 _HIGHLIGHT_SIZE = 220
+_MPC_COLOUR = "#3498db"    # calm blue
+_RBC_COLOUR = "#2ecc71"    # green
+_FRONTIER_COLOUR_FALLBACK = "#7f8c8d"
 _DOMINANT_SIZE = 80
+
+# Predefined study styles  (label, colour)
+MPC_STYLE = ("MPC", _MPC_COLOUR)
+RBC_STYLE = ("RBC", _RBC_COLOUR)
+
+
+@dataclass
+class ParetoStudy:
+    """One Pareto study to render on the shared plot."""
+    db_path: Path
+    study_name: str
+    label: str
+    colour: str
 
 
 def _is_minimisation(study: optuna.study.Study, obj_idx: int) -> bool:
@@ -38,124 +48,92 @@ def _is_minimisation(study: optuna.study.Study, obj_idx: int) -> bool:
     return study.directions[obj_idx] == StudyDirection.MINIMIZE
 
 
-def _build_pareto_dataframe(
-    study: optuna.study.Study,
-    highlight_trial: RankedTrial | None = None,
-) -> pd.DataFrame:
-    """Return a DataFrame of all Pareto-optimal (non-dominated) trials.
+def _build_dominant_df(study: optuna.study.Study) -> pd.DataFrame:
+    """Return DataFrame of non-dominated trials in minimisation space.
 
-    Columns: ``x``, ``y``, ``trial_number``, ``is_best``.
-    ``x`` and ``y`` are always in **minimisation space** so the plot
-    reads naturally (bottom-left = ideal point).
+    Columns: ``x``, ``y``, ``trial_number``.
     """
     dominant: list[FrozenTrial] = study.best_trials
     rows: list[dict[str, Any]] = []
-
     for t in dominant:
-        is_best = (
-            highlight_trial is not None and t.number == highlight_trial.trial.number
-        )
         rows.append(
             {
                 "x": t.values[0],
                 "y": t.values[1],
                 "trial_number": t.number,
-                "is_best": is_best,
             }
         )
-
     df = pd.DataFrame(rows)
     if df.empty:
-        # ensure columns exist even with zero rows
-        return pd.DataFrame(columns=["x", "y", "trial_number", "is_best"])
+        return pd.DataFrame(columns=["x", "y", "trial_number"])
 
-    # Flip axes into minimisation space for display
+    # Flip into minimisation space if needed
     if not _is_minimisation(study, 0):
         df["x"] = -df["x"]
     if not _is_minimisation(study, 1):
         df["y"] = -df["y"]
-
     return df
-
-
-
 
 
 # ── public API ────────────────────────────────────────────────────────────────
 
 
 def plot_pareto_dominant(
-    db_path: Path,
-    study_name: str,
-    highlight_trial: RankedTrial | None = None,
-    target_names: list[str] | None = None,
+    studies: list[ParetoStudy],
+    target_names: tuple[str, str] | None = None,
     figsize: tuple[float, float] = (9, 6),
     style_context: str = "whitegrid",
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
+    highlight: Optional[dict] = None,
 ) -> Figure:
-    """Pareto plot showing only non-dominated trials for a 2-objective study.
+    """Pareto plot showing non-dominated fronts for one or more studies.
 
     Parameters
     ----------
-    db_path :
-        Path to the SQLite ``*.db`` file.
-    study_name :
-        Name of the Optuna study inside the database.
-    highlight_trial :
-        If given, this trial is marked with a star and an annotation showing
-        its trial number and rank.  Typically the output of
-        ``_sorted_best_trial()``.
+    studies :
+        List of :class:`ParetoStudy` describing each Optuna study to render.
     target_names :
-        Human-readable axis labels.  Defaults to ``["Objective 0", "Objective 1"]``.
+        Human-readable axis labels ``(xlabel, ylabel)``.
+        Defaults to ``("Objective 0", "Objective 1")``.
     figsize :
         Matplotlib figure size in inches.
     style_context :
-        Seaborn style context name (passed to ``sns.axes_style``).
+        Seaborn style context name.
     xlim :
-        Tuple of ``(xmin, xmax)`` to set the X-axis limits.  Useful for
-        zooming into a region of interest when objectives span a wide range.
+        ``(xmin, xmax)``  —  auto-expanded to include all points if not given.
     ylim :
-        Tuple of ``(ymin, ymax)`` to set the Y-axis limits.
+        ``(ymin, ymax)``  —  auto-expanded to include all points if not given.
+    highlight :
+        Dict with ``x``, ``y`` and optional ``label`` / ``trial_number`` / ``rank``
+        for a trial to highlight with a star + annotation.
 
     Returns
     -------
     matplotlib.figure.Figure
-
-    Raises
-    ------
-    ValueError
-        If the study does not have exactly 2 objectives.
     """
-    assert db_path.exists(), f"Optuna database not found at {db_path}"
+    if not studies:
+        raise ValueError("At least one ParetoStudy is required.")
 
-    study = optuna.load_study(study_name=study_name, storage=f"sqlite:///{db_path}")
-    if len(study.directions) != 2:
-        raise ValueError(
-            f"Expected a 2-objective study, got {len(study.directions)}. "
-            f"Directions: {study.directions}"
+    # ── load all dominant DataFrames ─────────────────────────────────────────
+    all_dfs: list[pd.DataFrame] = []
+    labels: list[str] = []
+    colours: list[str] = []
+    for ps in studies:
+        assert ps.db_path.exists(), f"DB not found: {ps.db_path}"
+        study = optuna.load_study(
+            study_name=ps.study_name, storage=f"sqlite:///{ps.db_path}"
         )
+        if len(study.directions) != 2:
+            raise ValueError(
+                f"Study '{ps.study_name}' has {len(study.directions)} objectives "
+                "(expected 2)."
+            )
+        df = _build_dominant_df(study)
+        all_dfs.append(df)
+        labels.append(ps.label)
+        colours.append(ps.colour)
 
-    # ── data ─────────────────────────────────────────────────────────────────
-    df = _build_pareto_dataframe(study, highlight_trial)
-    if df.empty:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5,
-            0.5,
-            "No Pareto-optimal trials found.",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            fontsize=12,
-            color="gray",
-        )
-        ax.set_xlabel(target_names[0] if target_names else "Objective 0")
-        ax.set_ylabel(target_names[1] if target_names else "Objective 1")
-        return fig
-
-    dominant_df = df[~df["is_best"]]
-    best_df = df[df["is_best"]]
     x_label = target_names[0] if target_names else "Objective 0"
     y_label = target_names[1] if target_names else "Objective 1"
 
@@ -163,90 +141,105 @@ def plot_pareto_dominant(
     with sns.axes_style(style_context):
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Simple line connecting Pareto points (sorted low-x → high-x)
-        if len(df) >= 2:
-            sorted_df = df.sort_values("x").reset_index(drop=True)
-            ax.plot(
-                sorted_df["x"].values,
-                sorted_df["y"].values,
-                color=_FRONTIER_COLOUR,
-                lw=1.5,
-                ls="-",
-                zorder=1,
-                label="Pareto front",
-            )
+        all_x: list[float] = []
+        all_y: list[float] = []
 
-        # All dominant trials
-        sns.scatterplot(
-            data=dominant_df,
-            x="x",
-            y="y",
-            ax=ax,
-            color=_DOMINANT_COLOUR,
-            s=_DOMINANT_SIZE,
-            zorder=2,
-            alpha=0.75,
-            label="Non-dominated trials",
-        )
+        for df, label, colour in zip(all_dfs, labels, colours):
+            if df.empty:
+                continue
 
-        # Highlighted trial
-        if not best_df.empty:
+            all_x.extend(df["x"].tolist())
+            all_y.extend(df["y"].tolist())
+
+            # Frontier line  (sorted by x, low → high  →  top-left to bottom-right)
+            if len(df) >= 2:
+                s = df.sort_values("x").reset_index(drop=True)
+                ax.plot(
+                    s["x"].values,
+                    s["y"].values,
+                    color=colour,
+                    lw=1.5,
+                    ls="-",
+                    zorder=1,
+                    label=label,
+                )
+
+            # Points
             sns.scatterplot(
-                data=best_df,
+                data=df,
                 x="x",
                 y="y",
                 ax=ax,
+                color=colour,
+                s=_DOMINANT_SIZE,
+                zorder=2,
+                alpha=0.75,
+                legend=False,
+            )
+
+        # Highlighted trial
+        if highlight:
+            hx, hy = highlight["x"], highlight["y"]
+            label_parts = []
+            if "trial_number" in highlight:
+                label_parts.append(f"Trial {highlight['trial_number']}")
+            if "rank" in highlight:
+                label_parts.append(f"rank #{highlight['rank']}")
+            elif "label" in highlight:
+                label_parts.append(highlight["label"])
+            annotation_text = "\n".join(label_parts) if label_parts else None
+
+            ax.scatter(
+                hx, hy,
                 color=_HIGHLIGHT_COLOUR,
                 s=_HIGHLIGHT_SIZE,
                 marker="*",
                 zorder=5,
                 edgecolor="white",
                 lw=1.2,
-                label=f"Best trial (#{best_df.iloc[0]['trial_number']})",
+                label=annotation_text or "Highlighted",
             )
-
-            # Annotation
-            row = best_df.iloc[0]
-            trial_num = int(row["trial_number"])
-            rank_text = (
-                f"rank #{highlight_trial.rank}" if highlight_trial is not None else ""
-            )
-            ax.annotate(
-                f"Trial {trial_num}\n{rank_text}".strip(),
-                xy=(row["x"], row["y"]),
-                xytext=(12, 12),
-                textcoords="offset points",
-                fontsize=9,
-                fontweight="bold",
-                color=_HIGHLIGHT_COLOUR,
-                arrowprops=dict(
-                    arrowstyle="->",
+            if annotation_text:
+                ax.annotate(
+                    annotation_text,
+                    xy=(hx, hy),
+                    xytext=(12, 12),
+                    textcoords="offset points",
+                    fontsize=9,
+                    fontweight="bold",
                     color=_HIGHLIGHT_COLOUR,
-                    lw=1.2,
-                    connectionstyle="arc3,rad=0.15",
-                ),
-                zorder=6,
-            )
+                    arrowprops=dict(
+                        arrowstyle="->",
+                        color=_HIGHLIGHT_COLOUR,
+                        lw=1.2,
+                        connectionstyle="arc3,rad=0.15",
+                    ),
+                    zorder=6,
+                )
 
         ax.set_xlabel(x_label, fontsize=11)
         ax.set_ylabel(y_label, fontsize=11)
-        ax.set_title(
-            "Pareto Front",
-            fontsize=13,
-            fontweight="bold",
-            pad=12,
-        )
+        ax.set_title("Pareto Front", fontsize=13, fontweight="bold", pad=12)
 
-        # Axis limits
-        if xlim is not None:
-            ax.set_xlim(xlim)
-        if ylim is not None:
-            ax.set_ylim(ylim)
+        # ── axis limits ──────────────────────────────────────────────────
+        if all_x:
+            xmin = xlim[0] if xlim else min(all_x)
+            xmax = xlim[1] if xlim else max(all_x)
+            ymin = ylim[0] if ylim else min(all_y)
+            ymax = ylim[1] if ylim else max(all_y)
+        else:
+            xmin, xmax = xlim or (0, 1)
+            ymin, ymax = ylim or (0, 1)
 
-        # Clean legend
-        handles, labels = ax.get_legend_handles_labels()
+        xpad = (xmax - xmin) * 0.05 if xmax > xmin else 1
+        ypad = (ymax - ymin) * 0.05 if ymax > ymin else 1
+        ax.set_xlim(xmin - xpad, xmax + xpad)
+        ax.set_ylim(ymin - ypad, ymax + ypad)
+
+        # Legend (only line handles, not the scattered points)
+        handles, leg_labels = ax.get_legend_handles_labels()
         if handles:
-            ax.legend(handles, labels, loc="best", framealpha=0.9, edgecolor="gray")
+            ax.legend(handles, leg_labels, loc="best", framealpha=0.9, edgecolor="gray")
 
     fig.tight_layout()
     return fig
