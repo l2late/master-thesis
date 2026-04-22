@@ -138,17 +138,17 @@ def rbc_params_from_trial(
 # Metric definitions shared by all output formats
 METRIC_DEFS = [
     {
-        "label": "Energy consumption",
+        "label": "Energy consumption [W·h]",
         "col": "total_energy_watt_hour",
         "unit": "Wh",
     },
     {
-        "label": "Comfort violation",
+        "label": "Comfort violation [K·h]",
         "col": "total_comfort_violation_kelvin_hours",
         "unit": "K·h",
     },
     {
-        "label": "Peak power",
+        "label": "Peak power [W]",
         "col": "max_power_consumption_watt",
         "unit": "W",
     },
@@ -422,7 +422,7 @@ def main() -> None:
     # rbc_trial = _sorted_best_trial(p.rbc_db, p.rbc_study, weights=[4, 5])
     # u_max_W_m2, deadband = rbc_params_from_trial(rbc_trial, n_actuators=N_ACTUATORS)
     # Override to sensible value (1 degC) because RBC tuning leads to very small deadbands
-    rbc_deadband = np.ones(5)
+    rbc_deadband = np.ones(5) * 0.5
 
     mpc_trial = _sorted_best_trial(p.mpc_db, p.mpc_study, weights=[4, 5])
     R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
@@ -445,6 +445,7 @@ def main() -> None:
         highlight_trial=mpc_trial,
         target_names=["Energy (Wh)", "Comfort violation (K·h)"],
         ylim=(0, 200),
+        xlim=(8e5, 1.2e6),
     )
 
     # ── 4. Load model, plant, observer ───────────────────────────
