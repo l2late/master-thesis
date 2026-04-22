@@ -432,7 +432,7 @@ def main() -> None:
     mpc_trial = _sorted_best_trial(
         p.mpc_db,
         p.mpc_study,
-        weights=[5, 20],  # [Energy, Comfort]
+        weights=[3, 20],  # [Energy, Comfort]
     )  # it works best to put more weight on comfort (10) than energy (9) to get a good controller.
     R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
     lambda_du = mpc_trial.params.get("lambda_du", 0.0)
