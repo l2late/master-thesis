@@ -189,7 +189,10 @@ def plot_poles_publication(
         ax.set_box_aspect(0.5)
 
     if add_zoom:
-        if zoom_box is None:
+        # Skip auto-zoom if there aren't enough poles to make it meaningful
+        if n_zoom is not None and eig.size <= n_zoom + 1 and zoom_box is None:
+            add_zoom = False
+        if add_zoom and zoom_box is None:
             zoom_box = _compute_auto_zoom_box(eig, discrete=discrete, n_zoom=n_zoom)
 
         if zoom_box is not None:
