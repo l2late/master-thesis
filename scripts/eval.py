@@ -81,7 +81,7 @@ def resolve_run_path(
 
 def download_model_artifacts(wandb_path: WandBPath) -> tuple[Path, Path]:
     """Download checkpoint and config from WandB, return local paths."""
-    cache_root = paths.artifact_dir / "eval_cache"
+    cache_root = Path(paths.artifact_dir) / "eval_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
 
     ckpt_path = download_model_checkpoint_from_wandb(

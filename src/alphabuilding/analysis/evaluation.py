@@ -425,6 +425,13 @@ def evaluate_model_predictions(
     start_idx: int = 0,
 ) -> None:
 
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
+    if not config_path.exists():
+        raise FileNotFoundError(f"Missing config: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+
     if save_path is None:
         save_path = (
             Path(paths.report_results_dir)
@@ -436,12 +443,10 @@ def evaluate_model_predictions(
     else:
         assert save_path.is_dir(), "save_path must be a directory"
 
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
-    if not config_path.exists():
-        raise FileNotFoundError(f"Missing config: {config_path}")
+    print(f"Evaluating model from checkpoint: {ckpt_path}")
+    print(f"Using config: {config_path}")
+    print(f"Saving results to: {save_path}")
 
-    cfg = OmegaConf.load(config_path)
     cfg.paths = paths
     cfg.datamodule.batch_size = 1
     cfg.datamodule.num_workers = 1

@@ -187,7 +187,31 @@ See the script for more details on the available command line arguments.
 
 ## Evaluating the trained models
 
-TODO
+The evaluation script downloads a trained model from Weights & Biases and runs a comprehensive evaluation pipeline on the test set.
+
+Basic usage:
+```bash
+uv run python scripts/eval.py
+```
+
+This will automatically select the best run from WandB based on the lowest `val/rmse_celsius` metric, download the model checkpoint and config, and run a full evaluation pipeline.
+
+### Selecting which model to evaluate
+
+By default, the script auto-selects the best run from WandB. You can override this behavior:
+
+| Command | Description |
+| --- | --- |
+| `uv run python scripts/eval.py` | Auto-select best run by `val/rmse_celsius` |
+| `uv run python scripts/eval.py --run-id abc123xyz` | Evaluate a specific run by its WandB run ID |
+| `uv run python scripts/eval.py --metric-key val/mae_celsius` | Use a different metric for auto-selection |
+
+
+### What the evaluation does
+
+The evaluation pipeline (`alphabuilding.analysis.evaluation.evaluate_model_predictions`) runs a comprehensive analysis of the model including:
+- System analysis (eigenvalues/poles)
+- Comparison of model predictions on the test dataset
 
 ## Controller tuning and evaluation
 
