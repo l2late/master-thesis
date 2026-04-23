@@ -1,3 +1,26 @@
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Prerequisites](#prerequisites)
+- [Installing Python dependencies](#installing-python-dependencies)
+- [Quick start with TensorBoard logging](#quick-start-with-tensorboard-logging)
+- [Using Weights & Biases for logging](#using-weights--biases-for-logging)
+  - [Setting up WandB](#setting-up-wandb)
+    - [Manually](#manually)
+    - [Store them in a .env file](#store-them-in-a-env-file)
+- [Training the model](#training-the-model)
+  - [Experiments](#experiments)
+  - [Training on cloud GPU with Vast AI](#training-on-cloud-gpu-with-vast-ai)
+    - [Docker image for training on Vast AI](#docker-image-for-training-on-vast-ai)
+  - [Training multiple runs in parallel with CUDA MPS](#training-multiple-runs-in-parallel-with-cuda-mps)
+- [Evaluating the trained models](#evaluating-the-trained-models)
+  - [Selecting which model to evaluate](#selecting-which-model-to-evaluate)
+  - [What the evaluation does](#what-the-evaluation-does)
+- [Controller tuning and evaluation](#controller-tuning-and-evaluation)
+  - [Controller hyperparameters tuning](#controller-hyperparameters-tuning)
+  - [Comparison of MPC with Rule-Based Controller (RBC)](#comparison-of-mpc-with-rule-based-controller-rbc)
+- [Training Data generation](#training-data-generation)
+
 ## Introduction
 
 This repository contains code for the Master Thesis of Luca de Laat, student at the Delft Center for Systems and Control at Delft University of Technology.
@@ -61,7 +84,6 @@ Check the WandB documentation for how to do this.
 Now you need to set a few environment variables with the WandB credentials you just created. You can do this in two ways:
 
 #### Manually
-On linux
 
 ```bash
 export WANDB_API_KEY=<your_wandb_api_key>
