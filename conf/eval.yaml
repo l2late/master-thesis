@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
-  - datamodule: brcm_trajectory # Reference your datamodule config
-  - model: default # Reference your model config
+  - datamodule: brcm_trajectory
+  - model: default
   - _self_ # placed at end so the contents from this config file can override the defaults above
 
 # Evaluation specific settings
