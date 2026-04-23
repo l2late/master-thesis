@@ -29,7 +29,7 @@ python_logger = logging.getLogger(__name__)
 torch.set_default_dtype(torch.float64)
 
 
-def setup_wandb_logger(
+def setup_logger(
     cfg: DictConfig, model: L.LightningModule
 ) -> L.pytorch.loggers.Logger | None:
     if not cfg.get("logger"):
@@ -111,7 +111,7 @@ def train(cfg: DictConfig) -> float:
     callbacks: list[L.Callback] = instantiate_callbacks(cfg.get("callbacks"))
 
     check_and_visualize_matrices(cfg, model)
-    logger = setup_wandb_logger(cfg, model)
+    logger = setup_logger(cfg, model)
 
     # --- 4. Training ---
     trainer: L.Trainer = instantiate(cfg.trainer, callbacks=callbacks, logger=logger)

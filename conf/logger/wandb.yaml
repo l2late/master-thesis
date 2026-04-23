@@ -1,7 +1,7 @@
 _target_: lightning.pytorch.loggers.WandbLogger
 entity: ${oc.env:WANDB_ENTITY, l2late}
 project: ${oc.env:WANDB_PROJECT, BuildingThermalDynamics}
-save_dir: ${paths.log_dir}/
+save_dir: ${hydra:runtime.output_dir}/wandb
 offline: False
 log_model: True # NOT "all" — uploads only at end of training, respects save_top_k
 group: ${experiment_name}

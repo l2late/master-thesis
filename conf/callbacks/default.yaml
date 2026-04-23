@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 model_checkpoint:
-  dirpath: ${paths.output_dir}/checkpoints
+  dirpath: ${hydra:runtime.output_dir}/checkpoints
   filename: "epoch={epoch:04d}-val_rmse_celsius={val/rmse_celsius:.7f}"
   save_top_k: 2
   every_n_epochs: 5

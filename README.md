@@ -43,8 +43,10 @@ uv run python scripts/train.py logger=tensorboard
 This uses the TensorBoard logger, which does not require any setup and will log the training metrics to the `runs` directory. You can then visualize the training metrics with TensorBoard by running:
 
 ```bash
-uv run tensorboard --logdir runs
+uv run tensorboard --logdir logs/
+
 ```
+and go to the URL provided in the terminal (usually http://localhost:6006) to visualize the training metrics.
 
 ## Using Weights & Biases for logging
 
