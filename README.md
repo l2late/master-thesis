@@ -189,14 +189,26 @@ See the script for more details on the available command line arguments.
 
 TODO
 
-## Controller evaluation
-
-TODO
+## Controller tuning and evaluation
 
 ### Controller hyperparameters tuning
+The repository already contains the results of the hyperparameter tuning for the MPC and RBC (hysteresis) controllers in `output/eval_hopt` but you can also run the hyperparameter tuning yourself.
 
-TODO
+You can run the MPC and RBC (hysteresis) hyperparameter tuning with Optuna
+```bash
+uv run python scripts/control/mpc_hopt.py
+``````
+or
+```bash
+uv run python scripts/control/rbc_hopt.py
+``````
 
-### Comparison with Rule-Based Controller
+Use the `--help` flag to see the available command line arguments and options for the hyperparameter tuning scripts.
 
-TODO
+### Comparison of MPC with Rule-Based Controller (RBC)
+
+Evaluate and Compare the performance of the RBC and MPC controller with the trained model on the building plant model by running:
+```bash
+uv run python scripts/control/evaluate_rbc_and_mpc.py
+```
+
