@@ -718,8 +718,8 @@ def main() -> None:
             "y": float(mpc_trial.values[1]),
             "trial_number": mpc_trial.number,
         },
-        ylim=(0, 50),
-        xlim=(8e5, 3.5e6),
+        ylim=(0, 40),
+        xlim=(8e5, 1.13e6),
     )
 
     # ── 8. Save results ──────────────────────────────────────────

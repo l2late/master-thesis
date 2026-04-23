@@ -106,8 +106,8 @@ def main() -> None:
         ],
         target_names=("Energy (Wh)", "Comfort violation (K·h)"),
         highlight=highlight,
-        ylim=(0, 50),
-        xlim=(8e5, 3.5e6),
+        ylim=(0, 40),
+        xlim=(8e5, 1.13e6),
     )
 
     # Save

@@ -8,16 +8,18 @@ The code base uses MATLAB for data generation (using the BRCM Toolbox) and Pytho
 
 All the code is tested on Manjaro Linux with Python 3.10 and MATLAB R2022b.
 
-## Data generation
+## Prerequisites
 
-The training data is generated with MATLAB. The code is a modified version of the code used for the paper "Online Feedback Equilibrium Seeking" by G. Belgioioso et al. 2022. The original code can be found in the [GitHub repository of the paper](https://gitlab.nccr-automation.ch/mbadyn/fes-cdc-examples). 
+- Python 3.10
+- MATLAB R2022b (or later)
+- Wands & Biases account (for logging and storing artifacts)
+- CUDA-compatible GPU (for training the model)
 
-The modified code and input files for this thesis can be found in the `matlab` directory. The main script can be found in `matlab/fes-cdc-examples-master/buildings/generate_data.m`. This script generates the training data and saves it in the `data` directory. The generated data is in the form of .csv files.
+For training on cloud GPUs with Vast AI, you will also need:
+- A Vast AI account
+- Docker
 
-The script also allows to save the A,B,C,D matrices of the BRCM building in a .mat file (`data/building_plant_data.mat`), which can then be used as the plant model for evaluation of the controller with the trained model.
-Currently the matlab script does does not save the .mat file in the `data` directory (it saves it in the MATLAB running directory), but you can easily move it manually or modify the script to save it in the desired location.
-
-## Installing dependencies
+## Installing Python dependencies
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management and virtual environments.
 Make sure you have it installed or install it with pip:
 ```bash
@@ -27,6 +29,63 @@ pip install uv
 Then, you can install the dependencies by running the following command in the project root directory:
 ```bash
 uv sync
+```
+
+You can now use the command `uv run <file.py>` (instead of `python <file.py>` you might be familiar with) to run any python script within the virtual environment with the installed dependencies.
+
+## Quick start with TensorBoard logging
+You can test if the training is running:
+
+```bash
+uv run python scripts/train.py logger=tensorboard
+```
+
+This uses the TensorBoard logger, which does not require any setup and will log the training metrics to the `runs` directory. You can then visualize the training metrics with TensorBoard by running:
+
+```bash
+uv run tensorboard --logdir runs
+```
+
+## Using Weights & Biases for logging
+
+The codebase relies on Weights & Biases (WandB) for logging and storing artifacts (configs and model checkpoints). This allows you to easily track and compare different runs of the experiment and keep all the relevant information in one place.
+
+WandB offers a generous free tier for academics and students that should be more than sufficient for this project.
+You can sign up for a free account on their [website](https://wandb.ai/site/research/).
+
+### Setting up WandB
+You first need to create and set up your WandB account and create an API key, project name and entity name.
+Check the WandB documentation for how to do this.
+
+Now you need to set a few environment variables with the WandB credentials you just created. You can do this in two ways:
+
+#### Manually
+On linux
+
+```bash
+export WANDB_API_KEY=<your_wandb_api_key>
+export WANDB_PROJECT=<your_wandb_project_name>
+export WANDB_ENTITY=<your_wandb_entity_name>
+```
+
+#### Store them in a .env file
+
+You can also add the env vars to the example `.env_example` file and rename it to `.env`.
+Make sure it is not committed to version control as it contains sensitive information.
+The current `.gitignore` file already ignores the `.env` file, so you should be safe.
+
+You can now use the method of your choice to load the .env file and set the environment variables.
+
+For an easy and lightweight solution, you can use the `uv` directly:
+
+```bash
+uv run --env-file .env scripts/train.py logger=wandb
+```
+
+or use a tool like [direnv](https://direnv.net/) to automatically load the .env file when you enter the project directory (recommended for development). In this case you can simply run the training script without specifying the env file:
+
+```bash
+uv run python scripts/train.py logger=wandb
 ```
 
 ## Training the model
@@ -57,27 +116,18 @@ Example:
 uv run python scripts/train.py experiment=physical_1-to-1_non_stable
 ```
 
-## Using Weights & Biases for logging
 
-The codebase relies on Weights & Biases (WandB) for logging and storing artifacts (configs and model checkpoints). This allows you to easily track and compare different runs of the experiment and keep all the relevant information in one place.
-As well as to decouple training from the local file system, which is especially useful when training on cloud GPUs.
+## Training Data generation
 
-WandB offers a generous free tier for academics and students that should be more than sufficient for this project. 
-You can sign up for a free account on their [website](https://wandb.ai/site/research/).
+The training data is generated with MATLAB. 
+The data files are already present in the `/data` directory, but you can also generate them yourself by running the MATLAB script.
 
-#### Setting up WandB
-You first need to create and set up your wandb account and get you API key, project name and entity name.
-Check the WandB documentation for how to do this.
+The code is a modified version of the code used for the paper "Online Feedback Equilibrium Seeking" by G. Belgioioso et al. 2022. The original code can be found in the [GitHub repository of the paper](https://gitlab.nccr-automation.ch/mbadyn/fes-cdc-examples). 
 
-Then add these to the `.env_example` file and rename it to `.env`.
-Make sure it is not committed to version control as it contains sensitive information.
-The current `.gitignore` file already ignores the `.env` file, so you should be safe.
+The modified code and input files for this thesis can be found in the `matlab` directory. The main script can be found in `matlab/fes-cdc-examples-master/buildings/generate_data.m`. This script generates the training data and saves it in the `data` directory. The generated data is in the form of .csv files.
 
-Now you can run the training script with wandb logging enabled by using the following command:
-
-```bash
-uv run python scripts/train.py logger=wandb
-```
+The script also allows to save the A,B,C,D matrices of the BRCM building in a .mat file (`data/building_plant_data.mat`), which can then be used as the plant model for evaluation of the controller with the trained model.
+Currently the matlab script does does not save the .mat file in the `data` directory (it saves it in the MATLAB running directory), but you can easily move it manually or modify the script to save it in the desired location.
 
 ## Training on cloud GPU with Vast AI
 
