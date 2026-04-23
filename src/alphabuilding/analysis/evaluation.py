@@ -435,7 +435,7 @@ def evaluate_model_predictions(
     if save_path is None:
         save_path = (
             Path(paths.report_results_dir)
-            / cfg.model.topology
+            / f"{cfg.model.topology}_nl_{cfg.model.num_latent_states}"
             / f"lambda_{cfg.model.lambda_eigenvals_stability_penalty}"
             / f"{cfg.datamodule.noise_stds}"
         )

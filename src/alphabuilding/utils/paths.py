@@ -24,6 +24,7 @@ class PathsConfig:
     rbc_experiments_dir: str = "${path:output/controller_experiments/rbc}"
     mpc_sweeps_dir: str = "${path:output/mpc_experiments}"
     artifact_dir: str = "${path:output/artifacts}"
+    # TODO: Remove this hardcoded path. It would be nice to have a more robust way to manage this path, since it user-specific and may not even exist on the current machine.
     report_results_dir: str = (
         "${path:../../../../LaTeX/master-thesis-final-report/results}"
     )
