@@ -40,7 +40,7 @@ You can test if the training is running:
 uv run python scripts/train.py logger=tensorboard
 ```
 
-This uses the TensorBoard logger, which does not require any setup and will log the training metrics to the `runs` directory. You can then visualize the training metrics with TensorBoard by running:
+This uses the TensorBoard logger, which does not require any setup and will log the training metrics to the `logs/` directory. You can then visualize the training metrics with TensorBoard by running:
 
 ```bash
 uv run tensorboard --logdir logs/
@@ -77,15 +77,16 @@ Make sure `.env` is never committed to version control, as it contains sensitive
 You can now use the method of your choice to load the .env file and set the environment variables.
 
 For the simplest approach, pass the file directly to `uv`:
+(here we don't specify the logger argument because `wandb` is the default logger in the training config)
 
 ```bash
-uv run --env-file .env scripts/train.py logger=wandb
+uv run --env-file .env scripts/train.py
 ```
 
 or use a tool like [direnv](https://direnv.net/) to automatically load the .env file when you enter the project directory (recommended for development). In this case you can simply run the training script without specifying the env file:
 
 ```bash
-uv run python scripts/train.py logger=wandb
+uv run python scripts/train.py
 ```
 
 ## Training the model
