@@ -50,6 +50,7 @@ Cora/
 
 # Weights and Biases
 wandb/
+!/src/**/wandb/
 
 # Installer logs
 pip-log.txt
