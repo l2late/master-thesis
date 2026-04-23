@@ -133,10 +133,12 @@ logs/
 
 sinergym/
 *.parquet
-output/*
 mlruns
 /.agents/skills
 /.opencode
-/.sisyphus/plans
 /skills-lock.json
 AGENTS.md
+/output/*
+!/output/eval_hopt/
+!/output/eval_hopt/**
+!/output/eval_hopt/**/*.db

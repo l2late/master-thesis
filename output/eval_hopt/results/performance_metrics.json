@@ -1,0 +1,32 @@
+{
+  "rbc": {
+    "total_energy_watt_hour": 857041.5,
+    "total_comfort_violation_kelvin_hours": 35.508454332185956,
+    "max_power_consumption_watt": 14700.0
+  },
+  "mpc": {
+    "total_energy_watt_hour": 880776.6180108559,
+    "total_comfort_violation_kelvin_hours": 29.45198771883196,
+    "max_power_consumption_watt": 13420.239863184026
+  },
+  "comparison": [
+    {
+      "metric": "Energy consumption [W\u00b7h]",
+      "rbc": 857041.5,
+      "mpc": 880776.6180108559,
+      "improvement_pct": -2.769424585723779
+    },
+    {
+      "metric": "Comfort violation [K\u00b7h]",
+      "rbc": 35.508454332185956,
+      "mpc": 29.45198771883196,
+      "improvement_pct": 17.056407346529387
+    },
+    {
+      "metric": "Peak power [W]",
+      "rbc": 14700.0,
+      "mpc": 13420.239863184026,
+      "improvement_pct": 8.705851270856964
+    }
+  ]
+}
