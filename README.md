@@ -52,7 +52,8 @@ and go to the URL provided in the terminal (usually http://localhost:6006) to vi
 
 The codebase relies on Weights & Biases (WandB) for logging and storing artifacts (configs and model checkpoints). This allows you to easily track and compare different runs of the experiment and keep all the relevant information in one place.
 
-WandB offers a generous free tier for academics and students that should be more than sufficient for this project.
+WandB offers a generous free tier for academics and students. 
+But even the simple free tier should be more than sufficient for this project.
 You can sign up for a free account on their [website](https://wandb.ai/site/research/).
 
 ### Setting up WandB
