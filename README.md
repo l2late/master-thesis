@@ -1,18 +1,18 @@
 ## Introduction
 
-This repository contains code for the Master Thesis of Luca de Laat, student at the Delft Center for Systems and Control at the Delft University of Technology.
+This repository contains code for the Master Thesis of Luca de Laat, student at the Delft Center for Systems and Control at Delft University of Technology.
 
-This thesis focuses on the application of deep learning techniques for system identification and control of building 
+The thesis focuses on the application of deep learning techniques for system identification and control of building HVAC systems.
 
-The code base uses MATLAB for data generation (using the BRCM Toolbox) and Python/Pytorch for training the model and evaluating the controller. 
+The codebase uses MATLAB for data generation (via the [BRCM Toolbox](https://www.brcm.ethz.ch/)) and Python/PyTorch for model training and controller evaluation.
 
-All the code is tested on Manjaro Linux with Python 3.10 and MATLAB R2022b.
+Everything was tested on Manjaro Linux with Python 3.10 and MATLAB R2021a.
 
 ## Prerequisites
 
 - Python 3.10
-- MATLAB R2022b (or later)
-- Wands & Biases account (for logging and storing artifacts)
+- MATLAB R2021a (for me the BRCM Toolbox did not work nicely with newer versions of MATLAB, your experience may vary)
+- Weights & Biases account (for logging and storing artifacts)
 - CUDA-compatible GPU (for training the model)
 
 For training on cloud GPUs with Vast AI, you will also need:
@@ -31,7 +31,7 @@ Then, you can install the dependencies by running the following command in the p
 uv sync
 ```
 
-You can now use the command `uv run <file.py>` (instead of `python <file.py>` you might be familiar with) to run any python script within the virtual environment with the installed dependencies.
+You can now use `uv run <file.py>` to execute any Python script within the project's virtual environment with all dependencies installed.
 
 ## Quick start with TensorBoard logging
 You can test if the training is running:
@@ -44,20 +44,18 @@ This uses the TensorBoard logger, which does not require any setup and will log 
 
 ```bash
 uv run tensorboard --logdir logs/
-
 ```
-and go to the URL provided in the terminal (usually http://localhost:6006) to visualize the training metrics.
+
+Open the URL shown in the terminal (usually http://localhost:6006) to view training metrics.
 
 ## Using Weights & Biases for logging
 
 The codebase relies on Weights & Biases (WandB) for logging and storing artifacts (configs and model checkpoints). This allows you to easily track and compare different runs of the experiment and keep all the relevant information in one place.
 
-WandB offers a generous free tier for academics and students. 
-But even the simple free tier should be more than sufficient for this project.
-You can sign up for a free account on their [website](https://wandb.ai/site/research/).
+WandB offers a generous free tier for academics, and even the standard free plan should be more than sufficient for this project. You can sign up on their [website](https://wandb.ai/site/research/).
 
 ### Setting up WandB
-You first need to create and set up your WandB account and create an API key, project name and entity name.
+You first need to create a WandB account and generate an API key, a project name, and an entity name.
 Check the WandB documentation for how to do this.
 
 Now you need to set a few environment variables with the WandB credentials you just created. You can do this in two ways:
@@ -73,13 +71,12 @@ export WANDB_ENTITY=<your_wandb_entity_name>
 
 #### Store them in a .env file
 
-You can also add the env vars to the example `.env_example` file and rename it to `.env`.
-Make sure it is not committed to version control as it contains sensitive information.
-The current `.gitignore` file already ignores the `.env` file, so you should be safe.
+You can also add the environment variables to the example `.env_example` file and rename it to `.env`.
+Make sure `.env` is never committed to version control, as it contains sensitive information (the `.gitignore` already excludes it).
 
 You can now use the method of your choice to load the .env file and set the environment variables.
 
-For an easy and lightweight solution, you can use the `uv` directly:
+For the simplest approach, pass the file directly to `uv`:
 
 ```bash
 uv run --env-file .env scripts/train.py logger=wandb
@@ -129,18 +126,20 @@ uv run python scripts/train.py experiment=physical_1-to-1_non_stable
 
 ### Training on cloud GPU with Vast AI
 
-While the model and dataset are very small and easily fit on a consumer GPU. You can speed up training with Cloud GPUs.
-Also, you can use the CUDA MPS to train multiple runs in parallel on a single GPU. See the related section below for more details.
+While the model and dataset are small enough to run on a consumer GPU, cloud GPUs can speed up training significantly.
+You can also use CUDA MPS to train multiple runs in parallel on a single GPU — see the related section below.
 
 #### Docker image for training on Vast AI
-The repository provide necessary scripts build Docker images suitable for training on cloud GPUs with [Vast AI](https://vast.ai/).
+The repository provides scripts to build Docker images suitable for training on cloud GPUs with [Vast AI](https://vast.ai/).
 
 You can build the Docker image with the following command:
 ```bash
 ./docker/docker_build_and_push.sh
 ```
 
-This will build the Docker image and push it to Docker Hub. You can then use this image to train on Vast AI by following their documentation on how to use custom Docker images.
+This builds the Docker image and pushes it to Docker Hub. You can then use the image on Vast AI with their documentation on custom Docker images.
+
+To build the image without pushing:
 
 ```bash
 ./docker/docker_build_and_push.sh --no-push
@@ -149,7 +148,7 @@ This will build the Docker image and push it to Docker Hub. You can then use thi
 ### Training multiple runs in parallel with CUDA MPS
 If you have access to a GPU that supports [CUDA MPS](https://docs.nvidia.com/deploy/mps/introduction.html), you can train multiple runs in parallel on the same GPU.
 
-The script `scripts/orchstraate_multi_process_on_single_gpu.py` can be used to orchestrate multiple training runs in parallel on a single GPU using CUDA MPS.
+The script `scripts/orchestrate_multi_process_on_single_gpu.py` orchestrates multiple training runs in parallel on a single GPU using CUDA MPS.
 
 #### Example:
 Running 50 runs with different seeds and two different variants of the experiment in parallel on a single GPU with a maximum of 10 jobs running in parallel.
@@ -169,9 +168,8 @@ uv run python scripts/orchestrate_multi_process_on_single_gpu.py \
 ```
 
 The last line allows you to specify hydra configs and overrides for each run.
-the `--variants` option allows you to specify different variants for each run of the experiment (run sequentially). 
-In the example above, we create two variants of the experiment, one with no instability penalty and one with a the instability penalty active. The `trainer.max_epochs=500 logger=wandb 'datamodule.noise_stds=[2, 60]'` part allows you to specify additional hydra overrides that will be applied to all runs.
-See the script for more details on the available command line arguments.
+the `--variants` option allows you to specify different variants for the experiment (the runs within each variant are run sequentially). 
+See the script for more details on the available command-line arguments.
 
 ## Evaluating the trained models
 
@@ -206,14 +204,14 @@ The evaluation pipeline (`alphabuilding.analysis.evaluation.evaluate_model_predi
 ### Controller hyperparameters tuning
 The repository already contains the results of the hyperparameter tuning for the MPC and RBC (hysteresis) controllers in `output/eval_hopt` but you can also run the hyperparameter tuning yourself.
 
-You can run the MPC and RBC (hysteresis) hyperparameter tuning with Optuna
+You can run the MPC and RBC (hysteresis) hyperparameter tuning with [Optuna](https://optuna.org/):
 ```bash
 uv run python scripts/control/mpc_hopt.py
-``````
+```
 or
 ```bash
 uv run python scripts/control/rbc_hopt.py
-``````
+```
 
 Use the `--help` flag to see the available command line arguments and options for the hyperparameter tuning scripts.
 
@@ -235,5 +233,5 @@ The code is a modified version of the code used for the paper "Online Feedback E
 The modified code and input files for this thesis can be found in the `matlab` directory. The main script can be found in `matlab/fes-cdc-examples-master/buildings/generate_data.m`. This script generates the training data and saves it in the `data` directory. The generated data is in the form of .csv files.
 
 The script also allows to save the A,B,C,D matrices of the BRCM building in a .mat file (`data/building_plant_data.mat`), which can then be used as the plant model for evaluation of the controller with the trained model.
-Currently the matlab script does does not save the .mat file in the `data` directory (it saves it in the MATLAB running directory), but you can easily move it manually or modify the script to save it in the desired location.
+Currently the MATLAB script saves the `.mat` file in the MATLAB working directory rather than the `data` directory. You can move it manually or modify the script to output to the desired location.
 
