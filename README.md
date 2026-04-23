@@ -97,17 +97,24 @@ To start a training run, use the following command:
 uv run python scripts/train.py
 ```
 
-The training script uses [Hydra](https://hydra.cc/) for configuration management.
-Have a look at the `conf` directory for the default configuration options.
+The PyTorch Lightning module resides at `/src/alphabuilding/infrastructure/lightning/modules/discrete_observer_ode.py`.
+It is instantiated in `train.py` using Hydra.
 
-You can override any configuration option from the command line by using the syntax:
+The training script uses [Hydra](https://hydra.cc/) for configuration management which allows you to easily manage and override configuration options from the command line and run multiple training runs with different configurations.
+
+Have a look at the `conf` directory for the default configuration options.
+Especially look at the configurations defined in `conf/train.yaml` and `conf/model/default.yaml`.
+The different experiment configurations (topologies and instability penalty) can be found in `conf/experiment`.
+
+With Hydra you can easily override any configuration option from the command line using the following syntax:
 ```bash
 uv run python scripts/train.py <config_option>=<value>
 ```
 
 Example:
 ```bash
-uv run python scripts/train.py trainer.max_epochs=500 model.lr=0.001
+uv run python scripts/train.py experiment=physical_no_latent_states_soft_stable
+uv run python scripts/train.py experiment=physical_1-to-1_soft_stable
 ```
 
 ### Experiments

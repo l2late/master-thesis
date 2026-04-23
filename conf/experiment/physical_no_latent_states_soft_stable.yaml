@@ -5,5 +5,5 @@ tags:
 
 model:
   lambda_eigenvals_stability_penalty: 1
-  topology: PHYSICAL_FULLY_CONNECTED
+  topology: PHYSICAL_FULLY_CONNECTED # works with 0 latent states, unlike PHYSICAL_ONE_TO_ONE
   num_latent_states: 0
