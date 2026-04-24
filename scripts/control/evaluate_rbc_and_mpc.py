@@ -234,7 +234,7 @@ def _write_latex_table(metric_summary: list[dict], path: Path) -> Path:
     \label{tab:controller_performance}
     \begin{tabular}{lrrr}
     \toprule
-    \textbf{Metric} & \textbf{RBC} & \textbf{MPC} & \textbf{Improvement $\Delta$} \\
+    \textbf{Metric} & \textbf{RBC} & \textbf{MPC} & \textbf{Rel. improvement $\Delta$} \\$
     \midrule
     """
         + rows_tex
