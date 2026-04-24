@@ -204,8 +204,9 @@ class EconomicMPCController(Controller):
         self.effective_R_weights = (
             R_weights * scalers.heat.base_scaler.scale_ * (1.0 / NP_ROOM_AREAS)
         )
+        # NOTE: remove the NP_ROOM_AREAS scaling for slack weights, since we want the penalty to be per degree of violation, not scaled by room area. This way, a 1 degree violation in a small room is penalized the same as a 1 degree violation in a large room, which makes more sense from a comfort perspective.
         self.effective_slack_weight = (
-            slack_weights * scalers.temp.base_scaler.scale_ * NP_ROOM_AREAS
+            slack_weights * scalers.temp.base_scaler.scale_  # * NP_ROOM_AREAS
         )
         assert self.effective_R_weights.shape == (self.nu,), (
             f"Effective R_weight must have same shape as inputs: ({self.nu},)"
