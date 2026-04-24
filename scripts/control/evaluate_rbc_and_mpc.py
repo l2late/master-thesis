@@ -239,7 +239,6 @@ def _write_latex_table(metric_summary: list[dict], path: Path) -> Path:
     """
         + rows_tex
         + r"""
-    \\
     \bottomrule
     \end{tabular}
     \end{table}
