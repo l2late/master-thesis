@@ -143,3 +143,4 @@ AGENTS.md
 !/output/eval_hopt/
 !/output/eval_hopt/**
 !/output/eval_hopt/**/*.db
+/plans

@@ -85,7 +85,7 @@ def plot_pareto_dominant(
     style_context: str = "whitegrid",
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
-    highlight: Optional[dict] = None,
+    highlight: Optional[dict] | list[dict] = None,
 ) -> Figure:
     """Pareto plot showing non-dominated fronts for one or more studies.
 
@@ -105,8 +105,9 @@ def plot_pareto_dominant(
     ylim :
         ``(ymin, ymax)``  —  auto-expanded to include all points if not given.
     highlight :
-        Dict with ``x``, ``y`` and optional ``label`` / ``trial_number`` / ``rank``
-        for a trial to highlight with a star + annotation.
+        A dict with ``x``, ``y`` and optional ``label`` / ``trial_number`` / ``rank``
+        for a single trial to highlight, or a ``list[dict]`` to highlight
+        multiple trials.  Each highlighted point gets a red star + annotation.
 
     Returns
     -------
@@ -177,16 +178,17 @@ def plot_pareto_dominant(
                 legend=False,
             )
 
-        # Highlighted trial
-        if highlight:
-            hx, hy = highlight["x"], highlight["y"]
+        # Highlighted trial(s)
+        highlights = highlight if isinstance(highlight, list) else [highlight] if highlight else []
+        for hl in highlights:
+            hx, hy = hl["x"], hl["y"]
             label_parts = []
-            if "trial_number" in highlight:
-                label_parts.append(f"Trial {highlight['trial_number']}")
-            if "rank" in highlight:
-                label_parts.append(f"rank #{highlight['rank']}")
-            elif "label" in highlight:
-                label_parts.append(highlight["label"])
+            if "trial_number" in hl:
+                label_parts.append(f"Trial {hl['trial_number']}")
+            if "rank" in hl:
+                label_parts.append(f"rank #{hl['rank']}")
+            elif "label" in hl:
+                label_parts.append(hl["label"])
             annotation_text = "\n".join(label_parts) if label_parts else None
 
             ax.scatter(
@@ -197,17 +199,24 @@ def plot_pareto_dominant(
                 zorder=5,
                 edgecolor="white",
                 lw=1.2,
-                label=annotation_text or "Highlighted",
             )
             if annotation_text:
+                direction = hl.get("direction", "right")
+                if direction == "left":
+                    offset = (-18, -12)
+                    ha = "right"
+                else:
+                    offset = (12, 12)
+                    ha = "left"
                 ax.annotate(
                     annotation_text,
                     xy=(hx, hy),
-                    xytext=(12, 12),
+                    xytext=offset,
                     textcoords="offset points",
                     fontsize=9,
                     fontweight="bold",
                     color=_HIGHLIGHT_COLOUR,
+                    ha=ha,
                     arrowprops=dict(
                         arrowstyle="->",
                         color=_HIGHLIGHT_COLOUR,

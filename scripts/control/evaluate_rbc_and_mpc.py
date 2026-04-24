@@ -7,6 +7,10 @@ Usage
     # Point at a directory containing extracted cloud hopt output:
     uv run python scripts/control/evaluate_rbc_and_mpc.py --hopt-dir output/eval_hopt/
 
+    # Set a target max comfort violation and select trials that satisfy it:
+    uv run python scripts/control/evaluate_rbc_and_mpc.py \\
+        --hopt-dir output/eval_hopt/ --max-comfort-violation 20
+
     # Get help:
     uv run python scripts/control/evaluate_rbc_and_mpc.py --help
 """
@@ -55,6 +59,7 @@ from alphabuilding.control.visualization import (
 from alphabuilding.domain.types import Scalers
 from alphabuilding.infrastructure.optuna.discovery import find_paired_studies
 from alphabuilding.infrastructure.optuna.study_analysis import (
+    RankedTrial,
     RankingStrategy,
     controller_params_from_trial,
     get_sorted_best_trials,
@@ -69,7 +74,7 @@ from alphabuilding.utils.logging_config import setup_logging
 from alphabuilding.utils.paths import paths
 
 N_ACTUATORS = 5
-NP_ROOM_AREAS = np.array(global_config.ROOM_AREAS)
+MAX_RAD_POWER_W_M2 = 35.0
 
 torch.set_grad_enabled(False)
 
@@ -292,7 +297,7 @@ def _sorted_best_trial(
     *,
     strategy: RankingStrategy = RankingStrategy.WEIGHTED_SUM,
     weights: list[float] | None = None,
-) -> "RankedTrial":
+) -> RankedTrial:
     """Convenience: fetch the #1 ranked trial from a study."""
     ranked = get_sorted_best_trials(
         study_name=study_name,
@@ -304,19 +309,19 @@ def _sorted_best_trial(
     return ranked[0]
 
 
-def select_mpc_under_comfort_cap(
+def _select_under_comfort_cap(
     db_path: Path,
     study_name: str,
     comfort_cap: float,
-    comfort_tol: float = 0.0,
 ) -> FrozenTrial | None:
-    """Select the lowest-energy MPC trial whose comfort violation ≤ cap + tol.
+    """Select the lowest-energy trial whose comfort violation ≤ cap.
+
+    Works for both MPC and RBC studies (both are bi-objective: energy, comfort).
 
     Args:
         db_path: Path to the Optuna SQLite database.
-        study_name: Name of the MPC tuning study.
-        comfort_cap: Maximum allowed comfort violation in K·h (from RBC).
-        comfort_tol: Extra tolerance to allow MPC ≥ RBC comfort cap (K·h).
+        study_name: Name of the tuning study.
+        comfort_cap: Maximum allowed comfort violation in K·h.
 
     Returns:
         The selected FrozenTrial, or None if no trial satisfies the constraint.
@@ -332,16 +337,36 @@ def select_mpc_under_comfort_cap(
             continue
         if t.values is None or len(t.values) < 2:
             continue
-
-        energy = float(t.values[0])
         comfort = float(t.values[1])
-
-        if comfort <= comfort_cap + comfort_tol:
+        if comfort <= comfort_cap:
             feasible.append(t)
 
     # primary: energy, secondary: comfort, tie-break: trial number
     feasible.sort(key=lambda t: (float(t.values[0]), float(t.values[1]), t.number))
     return feasible[0] if feasible else None
+
+
+def _count_feasible_trials(
+    db_path: Path,
+    study_name: str,
+    comfort_cap: float,
+) -> tuple[int, int]:
+    """Return (feasible_count, total_complete_count)."""
+    study = optuna.load_study(
+        study_name=study_name,
+        storage=f"sqlite:///{db_path}",
+    )
+    total = 0
+    feasible = 0
+    for t in study.trials:
+        if t.state != TrialState.COMPLETE:
+            continue
+        if t.values is None or len(t.values) < 2:
+            continue
+        total += 1
+        if float(t.values[1]) <= comfort_cap:
+            feasible += 1
+    return feasible, total
 
 
 # --------------------------------------------------------------------------- #
@@ -398,12 +423,13 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--comfort-tol",
+        "--max-comfort-violation",
         type=float,
-        default=0.0,
+        default=None,
         help=(
-            "Allow MPC comfort violation to exceed RBC comfort by this "
-            "tolerance in K·h. Default: 0.0 (MPC must not exceed RBC)."
+            "Target maximum comfort violation in K·h. When set, selects the "
+            "lowest-energy RBC and MPC trials whose comfort ≤ this cap. "
+            "When omitted, uses the best-ranked (weighted-sum) trial from each study."
         ),
     )
 
@@ -473,11 +499,7 @@ def main() -> None:
     print(f"   Model checkpoint : {model_bundle.run_dir / 'checkpoints' / 'last.ckpt'}")
     print(f"   Hydra config     : {model_bundle.run_dir / '.hydra' / 'config.yaml'}")
 
-    # ── 3. RBC params (deadband override) ─────────────────────────
-    # Override to sensible value (0.5 degC) because RBC tuning leads to very small deadbands
-    rbc_deadband = np.ones(N_ACTUATORS) * 0.5
-
-    # ── 4. Load model, plant, observer ───────────────────────────
+    # ── 3. Load model, plant, observer ───────────────────────────
     sys_learned, dm, Kd_learned, cfg = load_learned_lti_ss(
         path=model_bundle.run_dir,
         auto_select_last=False,
@@ -497,9 +519,8 @@ def main() -> None:
 
     # MPC Settings
     mpc_horizon_hours = 24
-    max_rad_power_W_m2 = 35.0
     u_min_W_m2 = np.zeros(N_ACTUATORS)
-    u_max_W_m2 = np.ones(N_ACTUATORS) * max_rad_power_W_m2
+    u_max_W_m2 = np.ones(N_ACTUATORS) * MAX_RAD_POWER_W_M2
 
     # Timing
     plant_step_length_seconds = 30
@@ -572,7 +593,84 @@ def main() -> None:
         eval_steps=eval_steps,
     )
 
-    # ── 5. Run RBC simulation ────────────────────────────────────
+    # ── 4. Select RBC and MPC trials ─────────────────────────────
+    if args.max_comfort_violation is not None:
+        # ── Cap-driven selection ─────────────────────────────────────
+        comfort_cap = args.max_comfort_violation
+        print(f"\n📏  Target max comfort violation: {comfort_cap:.4f} K·h")
+
+        rbc_trial = _select_under_comfort_cap(
+            p.rbc_db, p.rbc_study, comfort_cap=comfort_cap
+        )
+        if rbc_trial is None:
+            raise RuntimeError(
+                f"No RBC trial satisfies comfort ≤ {comfort_cap:.4f} K·h. "
+                f"Consider increasing the cap or re-running the RBC hopt study."
+            )
+
+        mpc_trial = _select_under_comfort_cap(
+            p.mpc_db, p.mpc_study, comfort_cap=comfort_cap
+        )
+        if mpc_trial is None:
+            raise RuntimeError(
+                f"No MPC trial satisfies comfort ≤ {comfort_cap:.4f} K·h. "
+                f"Consider increasing the cap or re-running the MPC hopt study."
+            )
+
+        rbc_feasible, rbc_total = _count_feasible_trials(
+            p.rbc_db, p.rbc_study, comfort_cap
+        )
+        mpc_feasible, mpc_total = _count_feasible_trials(
+            p.mpc_db, p.mpc_study, comfort_cap
+        )
+
+        print("\n🎯  Selected RBC trial (lowest energy under cap):")
+        print(f"    Trial #          : {rbc_trial.number}")
+        print(f"    Feasible trials  : {rbc_feasible} of {rbc_total}")
+        print(f"    Energy  (values[0]): {float(rbc_trial.values[0]):.2f} Wh")
+        print(f"    Comfort (values[1]): {float(rbc_trial.values[1]):.4f} K·h")
+
+        print("\n🎯  Selected MPC trial (lowest energy under cap):")
+        print(f"    Trial #          : {mpc_trial.number}")
+        print(f"    Feasible trials  : {mpc_feasible} of {mpc_total}")
+        print(f"    Energy  (values[0]): {float(mpc_trial.values[0]):.2f} Wh")
+        print(f"    Comfort (values[1]): {float(mpc_trial.values[1]):.4f} K·h")
+    else:
+        # ── Default: best-ranked trial from each study ───────────────
+        print("\n📏  No comfort cap — selecting best-ranked trials (weighted-sum)")
+
+        rbc_ranked = _sorted_best_trial(p.rbc_db, p.rbc_study)
+        rbc_trial = rbc_ranked.trial
+
+        mpc_ranked = _sorted_best_trial(p.mpc_db, p.mpc_study)
+        mpc_trial = mpc_ranked.trial
+
+        print("\n🎯  Selected RBC trial (best ranked):")
+        print(f"    Trial #          : {rbc_trial.number}  (rank #{rbc_ranked.rank})")
+        print(f"    Energy  (values[0]): {float(rbc_trial.values[0]):.2f} Wh")
+        print(f"    Comfort (values[1]): {float(rbc_trial.values[1]):.4f} K·h")
+
+        print("\n🎯  Selected MPC trial (best ranked):")
+        print(f"    Trial #          : {mpc_trial.number}  (rank #{mpc_ranked.rank})")
+        print(f"    Energy  (values[0]): {float(mpc_trial.values[0]):.2f} Wh")
+        print(f"    Comfort (values[1]): {float(mpc_trial.values[1]):.4f} K·h")
+
+    # ── 5. Extract controller params from selected trials ────────
+    # u_max stays hardcoded at 35 W/m² for both controllers.
+    _, rbc_deadband = rbc_params_from_trial(
+        rbc_trial, u_max_override=MAX_RAD_POWER_W_M2
+    )
+
+    R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
+    lambda_du = mpc_trial.params.get("lambda_du", 0.0)
+
+    print(f"\n⚙️  RBC deadband : {rbc_deadband[0]:.4f} °C")
+    print(f"   R_weight[0]      : {R_weights[0]:.4f}")
+    print(f"   slack_weight[0]  : {slack_weights[0]:.4f}")
+    print(f"   lambda_du        : {lambda_du:.4f}")
+    print(f"   margins          : {margins}")
+
+    # ── 6. Run RBC simulation ────────────────────────────────────
     rbc_controller = RbcController(
         n_actuators=N_ACTUATORS,
         u_min=u_min_W_m2,
@@ -591,69 +689,12 @@ def main() -> None:
             df=controller_input_df,
         )
 
-    # ── 5b. Compute RBC comfort cap ──────────────────────────────
-    # The actual RBC comfort violation from this simulation run defines the cap.
-    rbc_rbc_eval = {
-        "RBC": rbc_results_df[
-            rbc_results_df["simulation_phase"] == SimulationPhase.EVALUATION
-        ]
-    }
-    rbc_perf_row = hvac_control_performance_metrics(rbc_rbc_eval["RBC"]).iloc[0]
-    rbc_comfort_cap = float(rbc_perf_row["total_comfort_violation_kelvin_hours"])
-    print(f"\n📏  RBC comfort cap: {rbc_comfort_cap:.4f} K·h")
-    print(f"    Tolerance    : {args.comfort_tol:.4f} K·h")
-    print(f"    Effective cap: {rbc_comfort_cap + args.comfort_tol:.4f} K·h")
+    rbc_eval = rbc_results_df[
+        rbc_results_df["simulation_phase"] == SimulationPhase.EVALUATION
+    ]
+    rbc_perf_row = hvac_control_performance_metrics(rbc_eval).iloc[0]
 
-    # ── 5c. Select MPC trial under comfort cap ───────────────────
-    mpc_trial = select_mpc_under_comfort_cap(
-        p.mpc_db,
-        p.mpc_study,
-        comfort_cap=rbc_comfort_cap,
-        comfort_tol=args.comfort_tol,
-    )
-
-    if mpc_trial is None:
-        raise RuntimeError(
-            f"No MPC trial satisfies comfort ≤ RBC comfort cap "
-            f"({rbc_comfort_cap:.4f} K·h + {args.comfort_tol:.4f} tolerance). "
-            f"Consider increasing --comfort-tol or re-running the MPC hopt study."
-        )
-
-    R_weights, slack_weights, margins = controller_params_from_trial(mpc_trial)
-    lambda_du = mpc_trial.params.get("lambda_du", 0.0)
-    # lambda_du = 1000
-
-    mpc_energy = float(mpc_trial.values[0])
-    mpc_comfort = float(mpc_trial.values[1])
-
-    # Count feasible trials for reporting
-    _all_feasible = []
-    _study_tmp = optuna.load_study(
-        study_name=p.mpc_study,
-        storage=f"sqlite:///{p.mpc_db}",
-    )
-    for _t in _study_tmp.trials:
-        if _t.state != TrialState.COMPLETE:
-            continue
-        if _t.values is None or len(_t.values) < 2:
-            continue
-        if float(_t.values[1]) <= rbc_comfort_cap + args.comfort_tol:
-            _all_feasible.append(_t)
-    n_feasible = len(_all_feasible)
-
-    print("\n🎯  Selected MPC trial under RBC comfort cap:")
-    print(f"    Trial #          : {mpc_trial.number}")
-    print(
-        f"    Feasible trials  : {n_feasible} of {len([t for t in _study_tmp.trials if t.state == TrialState.COMPLETE and t.values and len(t.values) >= 2])}"
-    )
-    print(f"    Energy  (values[0]): {mpc_energy:.2f} Wh")
-    print(f"    Comfort (values[1]): {mpc_comfort:.4f} K·h")
-    print(f"    R_weight[0]        : {R_weights[0]:.4f}")
-    print(f"    slack_weight[0]    : {slack_weights[0]:.4f}")
-    print(f"    lambda_du          : {lambda_du:.4f}")
-    print(f"    margins            : {margins}")
-
-    # ── 6. Run MPC simulation ────────────────────────────────────
+    # ── 7. Run MPC simulation ────────────────────────────────────
     mpc_controller = EconomicMPCController(
         model=sys_learned,
         horizon=mpc_horizon_hours * controller_steps_per_hour,
@@ -677,26 +718,28 @@ def main() -> None:
             df=controller_input_df,
         )
 
-    # ── 7. Filter, plot, and report ──────────────────────────────
+    mpc_eval = mpc_results_df[
+        mpc_results_df["simulation_phase"] == SimulationPhase.EVALUATION
+    ]
+    mpc_perf_row = hvac_control_performance_metrics(mpc_eval).iloc[0]
+
+    # ── 8. Filter, plot, and report ──────────────────────────────
     results = {
         "RBC": rbc_results_df,
         "MPC": mpc_results_df,
     }
     evaluation_results = {
-        name: df[df["simulation_phase"] == SimulationPhase.EVALUATION]
-        for name, df in results.items()
+        "RBC": rbc_eval,
+        "MPC": mpc_eval,
     }
 
     mpc_fig = plot_simulation_results_multiple_controllers(results=evaluation_results)
     mpc_fig.show()
 
-    # ── 7b. Performance metrics & comparison ────────────────────
-    mpc_perf_row = hvac_control_performance_metrics(evaluation_results["MPC"]).iloc[0]
-
     metric_summary = _build_metric_summary(rbc_perf_row, mpc_perf_row)
     _print_metric_table(metric_summary)
 
-    # ── 7c. Pareto fronts: MPC + RBC ─────────────────────────────
+    # ── 8b. Pareto fronts: MPC + RBC, highlight both selected ───
     pareto_fig = plot_pareto_dominant(
         studies=[
             ParetoStudy(
@@ -713,16 +756,25 @@ def main() -> None:
             ),
         ],
         target_names=("Energy (Wh)", "Comfort violation (K·h)"),
-        highlight={
-            "x": float(mpc_trial.values[0]),
-            "y": float(mpc_trial.values[1]),
-            "trial_number": mpc_trial.number,
-        },
+        highlight=[
+            {
+                "x": float(rbc_trial.values[0]),
+                "y": float(rbc_trial.values[1]),
+                "trial_number": rbc_trial.number,
+                "direction": "right",
+            },
+            {
+                "x": float(mpc_trial.values[0]),
+                "y": float(mpc_trial.values[1]),
+                "trial_number": mpc_trial.number,
+                "direction": "left",
+            },
+        ],
         ylim=(0, 40),
         xlim=(8e5, 1.13e6),
     )
 
-    # ── 8. Save results ──────────────────────────────────────────
+    # ── 9. Save results ──────────────────────────────────────────
     results_dir = Path(paths.output_dir) / "eval_hopt" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
