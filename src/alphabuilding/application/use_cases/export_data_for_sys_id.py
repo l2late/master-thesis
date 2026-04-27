@@ -11,8 +11,8 @@ def export_datamodule_to_matlab(
     datamodule: BRCMTrajectoryLitDataModule, output_path="system_id_data.mat"
 ):
     # 1. Run setup to generate splits, apply scaling, and populate data_tensors
-    datamodule.setup("fit")
-    datamodule.setup("test")  # Ensures test indices are populated
+    datamodule.setup()
+    # datamodule.setup("test")  # Ensures test indices are populated
 
     # 2. Move continuous tensors to CPU and convert to numpy
     # We use .cpu().numpy() because data_tensors might be on the GPU

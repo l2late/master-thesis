@@ -144,3 +144,5 @@ AGENTS.md
 !/output/eval_hopt/**
 !/output/eval_hopt/**/*.db
 /plans
+# CocoIndex Code (ccc)
+/.cocoindex_code/

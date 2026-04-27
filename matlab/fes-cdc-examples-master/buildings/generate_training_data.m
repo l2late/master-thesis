@@ -377,7 +377,7 @@ if export_model==1
     save_path = fullfile(LocalPath, 'building_plant_data.mat');
     time_posix = posixtime(dt); 
 
-    % Save dynamics matrices
+    % Save dynamics 
     % Note: Python will read these matrices. 
     % Bvu and Bxu are 3D arrays (bilinear terms).
     save(save_path, 'A_cont', 'Bu_cont', 'Bv_cont', 'Bvu_cont', 'Bxu_cont', ...
