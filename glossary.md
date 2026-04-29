@@ -1,3 +1,0 @@
-Internal Model / Prediction Model / Reduced-Order Model : model used by the MPC controller to predict the future behavior of the system. It is typically a simplified version of the actual system, designed to capture the essential dynamics while being computationally efficient for real-time optimization.
-
-Plant Model / Simulation Model : (high fidelity) model of the actual system, used for simulation and testing purposes. It is typically more detailed and accurate than the internal model, but may be too complex for real-time optimization in an MPC controller. Used for testing the performance of the MPC controller and validating the predictions made by the internal model.
