@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from alphabuilding.control.types import SimulationPhase
 from alphabuilding.domain.df_schemas import SimulationResult
 
 
@@ -80,7 +81,10 @@ def max_power_consumption_watt(df: pd.DataFrame) -> float:
     return float(max_power_watt)
 
 
-def hvac_control_performance_metrics(df: pd.DataFrame) -> pd.DataFrame:
+def hvac_control_performance_metrics(
+    df: pd.DataFrame, phase: SimulationPhase = SimulationPhase.EVALUATION
+) -> pd.DataFrame:
+    df = df[df["simulation_phase"] == phase.value]
     total_energy = total_energy_consumption_watt_hour(df)
     total_violation = total_comfort_violation_kelvin_hours(df)
     max_power = max_power_consumption_watt(df)
