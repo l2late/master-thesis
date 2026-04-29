@@ -175,9 +175,6 @@ class EconomicMPCController(Controller):
         # Ground disturbance directions; same pattern as in build_augmented_system
         self.B_g = np.zeros((self.nx, self.nd_gnd))
 
-        # NOTE: 5 Input disturbances to the LATENT states
-        # self.B_g[self.nx // 2 :, :] = np.eye(self.nd_gnd)
-
         # NOTE: 5 Input disturbances to the ROOM AIR states
         self.B_g[: self.ny, :] = np.eye(self.nd_gnd)
 
@@ -204,10 +201,8 @@ class EconomicMPCController(Controller):
         self.effective_R_weights = (
             R_weights * scalers.heat.base_scaler.scale_ * (1.0 / NP_ROOM_AREAS)
         )
-        # NOTE: remove the NP_ROOM_AREAS scaling for slack weights, since we want the penalty to be per degree of violation, not scaled by room area. This way, a 1 degree violation in a small room is penalized the same as a 1 degree violation in a large room, which makes more sense from a comfort perspective.
-        self.effective_slack_weight = (
-            slack_weights * scalers.temp.base_scaler.scale_  # * NP_ROOM_AREAS
-        )
+        self.effective_slack_weight = slack_weights * scalers.temp.base_scaler.scale_
+
         assert self.effective_R_weights.shape == (self.nu,), (
             f"Effective R_weight must have same shape as inputs: ({self.nu},)"
         )
@@ -269,15 +264,6 @@ class EconomicMPCController(Controller):
         cost += cp.sum(
             cp.multiply(self.slack_lower + self.slack_upper, slack_weights[:, None])
         )
-
-        ## L2 comfort violation penalty
-        # L2_weights = slack_weights * 100.0
-        # cost += cp.sum(
-        #     cp.multiply(
-        #         cp.square(self.slack_lower) + cp.square(self.slack_upper),
-        #         L2_weights[:, None],
-        #     )
-        # )
 
         # Differences along time axis: shape (nu, horizon-1)
         du = self.u_var[:, 1:] - self.u_var[:, :-1]
@@ -360,30 +346,6 @@ class EconomicMPCController(Controller):
             Tmax_traj[0, :],
             disturbance_forecast[0, :],
         )
-
-        # try:
-        # ## for Quadratic problem
-        # self.problem.solve(
-        #     solver=cp.GUROBI,
-        #     warm_start=True,
-        #     verbose=False,
-        #     Method=2,  # Use Barrier algorithm
-        #     Crossover=0,  # Disable crossover
-        #     FeasibilityTol=1e-4,
-        #     OptimalityTol=1e-4,
-        #     BarConvTol=1e-4,
-        #     TimeLimit=10.0,  # E.g., 10 seconds
-        # )
-        ## for linear problem: remove L2 penalty
-        # self.problem.solve(
-        #     solver=cp.GUROBI,
-        #     warm_start=True,
-        #     verbose=False,
-        #     Method=1,  # Dual Simplex (warm-startable)
-        #     FeasibilityTol=1e-4,
-        #     OptimalityTol=1e-4,
-        #     TimeLimit=10.0,
-        # )
 
         self.problem.solve(
             solver=cp.CLARABEL,

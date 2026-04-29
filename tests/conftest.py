@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from alphabuilding.control.brcm_building import (
-    test_disturbances,
+    get_test_set_disturbances,
 )
 from alphabuilding.control.utils import (
     load_learned_lti_ss,
@@ -83,7 +83,7 @@ def datamodule():
 
 @pytest.fixture(scope="session")
 def validation_disturbances_df(mat_file_path, datamodule):
-    return test_disturbances(mat_file_path, datamodule)
+    return get_test_set_disturbances(mat_file_path, datamodule)
 
 
 @pytest.fixture(scope="session")

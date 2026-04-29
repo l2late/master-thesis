@@ -82,7 +82,8 @@ def read_brcm_ss_mat_file(mat_file_path: str | Path) -> BRCMStateSpaceModel:
     return ss
 
 
-def read_brcm_data_file(mat_file_path: str | Path) -> dict[str, np.ndarray]:
+def read_mat_file(mat_file_path: str | Path) -> dict[str, np.ndarray]:
+    """Utility function that reads .mat file and returns a dictionary of numpy arrays."""
     assert Path(mat_file_path).exists(), f"File not found: {mat_file_path}"
     data = scipy.io.loadmat(mat_file_path)
 
@@ -97,12 +98,13 @@ def W_per_m2_to_W_per_room(u_radiators: np.ndarray) -> np.ndarray:
     return u_W_per_room
 
 
-def test_disturbances(
+def get_test_set_disturbances(
     brcm_mat_file: Path, datamodule: L.LightningDataModule
 ) -> pd.DataFrame:
+    """Load disturbances for the test set (based on the datamodule configuration) from the BRCM .mat file and return as a pandas DataFrame indexed by timestamps."""
     test_indices = tuple(idx + 500 for idx in datamodule.test_indices)
     test_slice = slice(test_indices[0], test_indices[1])
-    data = read_brcm_data_file(brcm_mat_file)
+    data = read_mat_file(brcm_mat_file)
     Tamb_seq = data["Tamb"]
     SolRad_seq = data["SolRad"]
     timestamps = data["time_posix"].astype("datetime64[s]").flatten()
